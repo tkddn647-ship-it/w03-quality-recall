@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}개선 효과{% endblock %}
+{% block body %}
+<h1>개선 효과 비교</h1>
+<div class="banner"><b>모두 추정치입니다.</b> 아래 수치는 원본 데이터와 이 시스템의 규칙으로 계산한 <b>비교 기준별 추정</b>이며 실제 성과가 아닙니다.
+  각 표에 비교 기준과 가정을 함께 적었습니다. 새 판정 로직은 쓰지 않고 기존 재공급 판정(R8)·로트 비교를 그대로 재사용합니다.
+  업무일 {{ e.business_date | daylabel }} · 원본 기준일 {{ e.as_of | daylabel }}</div>
+
+<h2>(a) 과잉 대응 — 현실적인 대안과 비교</h2>
+{% set o = e.overreaction %}
+{% if o %}
+<p class="small muted">비교 기준: 고객 인도분 = SBL(출하-배치 연결표, 원본 키) 출하 수량 · 사내 재고 = 생산량 − SBL 출하 합(A-5 추정) ·
+  재공급 필요량 = 인도분 전량(상한값 A-8) · 여유 = {{ o.line }} 1기간 여유(A-6). 대안 범위는 가정 A-30 — 담당자가 실제로 고를 수 있는 두 대안을 대표 비교로 두고,
+  유통기한·판매 소진·고객 보유량은 반영하지 않았습니다. 언론 보도: {{ o.news | terms }}.</p>
+<div class="scroll"><table>
+  <tr><th>시나리오</th><th>범위</th><th>배치</th><th>고객</th><th>고객 인도분(EA)</th><th>실제 대비</th><th>사내 재고 추정(EA)</th><th>재공급 필요 ÷ 여유</th><th>R8 판정</th></tr>
+  {% for r in o.rows %}<tr{% if loop.last %} style="font-weight:600"{% endif %}><td>{{ r.label }}</td><td class="small">{{ r.basis }}</td>
+    <td class="n">{{ r.batches }}</td><td class="n">{{ r.customers }}</td><td class="n">{{ r.shipped | num }}</td>
+    <td class="n">{{ '기준' if loop.last else '약 ' ~ r.times ~ '배' }}</td><td class="n">{{ r.stock | num }}</td>
+    <td class="n">{{ r.ratio }}</td><td>{{ r.overall }}</td></tr>{% endfor %}
+</table></div>
+<p class="small">읽는 법: 두 대안은 회수·재공급 물량을 실제 대상보다 늘리고(재공급 필요 ÷ 여유가 커짐), 확정 불량이 없는 배치까지 고객 회수를 요청하게 됩니다.
+  같은 로트 배치는 회수 대신 조사대상(R6)·출하 전 추가검사(R9)로 다룹니다.</p>
+<details class="small"><summary>상한(참고) — 전 기간 전면 회수</summary>
+<div class="scroll"><table>
+  <tr><th>시나리오</th><th>범위</th><th>배치</th><th>고객</th><th>고객 인도분(EA)</th><th>실제 대비</th><th>사내 재고 추정(EA)</th><th>재공급 필요 ÷ 여유</th><th>R8 판정</th></tr>
+  {% for r in o.upper %}<tr><td>{{ r.label }}</td><td class="small">{{ r.basis }}</td><td class="n">{{ r.batches }}</td><td class="n">{{ r.customers }}</td>
+    <td class="n">{{ r.shipped | num }}</td><td class="n">약 {{ r.times }}배</td><td class="n">{{ r.stock | num }}</td><td class="n">{{ r.ratio }}</td><td>{{ r.overall }}</td></tr>{% endfor %}
+</table></div>
+<p class="muted">비교 대표값이 아니라 범위를 보여 주는 참고치입니다.</p></details>
+<p class="small">
+  이 시스템은 원본 정책(확정 불량 + 배치 불량률 10%, R1·R5)으로 대상을 좁힙니다. 회수 비용·매출 영향 금액은 단가·회수율 근거가 없어 계산하지 않았습니다.</p>
+{% else %}<p class="muted">아직 판정 전 — '판정 실행' 후 계산됩니다.</p>{% endif %}
+
+<h2>(b) 대응 지연 — 제공 BPMN 대비 바뀐 구조</h2>
+<p class="small muted">비교 기준: 제공 BPMN(W03.bpmn) 단계 순서. '지금 데이터' 열은 현재 DB에서 센 값입니다. 처리 소요 시간이 며칠 줄었는지는 원본에 기준 소요 시간이 없어 <b>추정하지 않습니다</b>.</p>
+<div class="scroll"><table>
+  <tr><th>BPMN 단계</th><th>제공 흐름</th><th>이 시스템</th><th>지금 데이터</th><th>근거</th></tr>
+  {% for d in e.delay %}<tr><td><b>{{ d.step }}</b></td><td class="small">{{ d.bpmn }}</td><td class="small">{{ d.system }}</td>
+    <td class="small">{{ d.now }}</td><td class="small">{{ d.basis }}</td></tr>{% endfor %}
+</table></div>
+
+<h2>(c) 로트 역추적 확장 — 있을 때와 없을 때 {% if e.lot %}<a class="small" href="/lots/{{ e.lot.lot }}">로트 역추적 화면</a>{% endif %}</h2>
+{% if e.lot %}
+<p class="small muted">비교 기준: {{ e.lot.mode }}. 확장 없음 = 같은 로트 재고를 검사 없이 정상 재고로 취급(A-26), 확장 있음 = 추가검사 합격분만 출하·재공급(A-22).</p>
+<div class="scroll"><table>
+  <tr><th>항목</th><th>확장 없음</th><th>확장 있음</th><th>설명</th></tr>
+  {% for r in e.lot.rows %}<tr><td>{{ r.label }}</td><td class="n">{{ r.without | num if r.without is number else r.without }}</td>
+    <td class="n"><b>{{ r.with | num if r.with is number else r.with }}</b></td><td class="small">{{ r.note }}</td></tr>{% endfor %}
+</table></div>
+{% else %}<p class="muted">아직 판정 전 — '판정 실행' 후 계산됩니다.</p>{% endif %}
+
+<h2 id="provenance">추가 데이터 추적성 점검</h2>
+<p class="small muted">A05 §6 기준: 앱이 만든 데이터(정정·모의 회신·추가 클레임·검사 결과·의결)는 식별자·적용 시점(업무일)·원본 연결·생성 이유를 가져야 합니다. 원본 CSV는 바꾸지 않습니다.</p>
+<div class="scroll"><table>
+  <tr><th>종류</th><th>출처 성격</th><th>건수</th>{% for f in fields %}<th>{{ f }}</th>{% endfor %}<th>예시</th></tr>
+  {% for a in audit %}<tr><td><span class="code-term" title="원래 이름: {{ a.table }}">{{ a.kind }}</span></td><td class="small">{{ a.nature }}</td><td class="n">{{ a.rows }}</td>
+    {% for f in fields %}<td>{% if not a.rows %}<span class="muted">-</span>{% elif a.missing[f] %}<span class="pill t-bad">빠짐 {{ a.missing[f] }}</span>{% else %}<span class="pill t-ok">있음</span>{% endif %}</td>{% endfor %}
+    <td class="small">{% if a.samples %}{% set s = a.samples[0] %}{{ s['식별자'] }} · {{ s['적용 시점'] }} · {{ s['원본 연결'] | terms }} · {{ s['생성 이유'] | terms }}{% else %}<span class="muted">아직 없음</span>{% endif %}</td></tr>{% endfor %}
+</table></div>
+{% endblock %}

@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}용어집{% endblock %}
+{% block body %}
+<h1>용어집 — 규칙 · 가정 · 출처</h1>
+<p class="muted">화면에 나오는 R1, A-5 같은 번호의 뜻과 근거입니다. 화면에서 번호에 마우스를 올리면 한 줄 설명이 나오고, 누르면 이 페이지로 옵니다.</p>
+<div class="row">
+  {% for n in natures %}<div class="card"><span class="pill {{ nature_class[n] }}">{{ n }}</span>
+    <div class="small" style="margin-top:4px">{{ nature_help[n] }}</div>
+    <div class="small muted">{{ counts[n] }}개{% if n == '가정' %} (A-1~A-{{ counts[n] }}){% endif %}</div></div>{% endfor %}
+  <div class="card"><span class="pill t-muted">판단 규칙</span>
+    <div class="small" style="margin-top:4px">R1~R{{ rules | length }} — 위 집계에 넣지 않고 따로 셉니다</div>
+    <div class="small muted">{{ rules | length }}개 = {% for n in natures if rule_counts[n] %}{{ n }} 근거 {{ rule_counts[n] }}{{ ' · ' if not loop.last }}{% endfor %}
+      (R1은 원본 사실 + 가정 A-2)</div></div>
+</div>
+<p class="small">출처 성격으로 거르기:
+  <a href="/glossary">전체</a>{% for n in natures %} · <a href="/glossary?nature={{ n }}">{{ n }}</a>{% endfor %}</p>
+
+<h2 id="A-28-table">A-28 작업 처리 목표일 ({{ calendar }})</h2>
+<p class="small muted">작업이 생긴 업무일 + 영업일 수. 이미 나간 물건이 더 퍼지는 것을 막는 격리·통지를 가장 짧게, 회수와 별도 트랙(R4)인 원인 조사는 길게 잡았습니다.
+  <b>지정</b>은 품질팀이 정한 값, 나머지는 이전 달력일 값을 같은 마감일이 되도록 영업일로 환산한 값입니다(마감일이 주말이면 다음 월요일). 마감일은 원본 기준일 {{ as_of | daylabel }}에 생긴 작업 기준입니다.</p>
+<div class="scroll"><table>
+  <tr><th>작업 유형</th><th>처리 목표(영업일)</th><th>근거</th><th>이전(달력일)</th><th>이전 마감일</th><th>새 마감일</th><th>왜 이 기한인가</th></tr>
+  {% for r in due_table %}<tr><td>{{ r.type }}</td><td class="n"><b>{{ '당일' if r.bdays == 0 else r.bdays ~ '영업일' }}</b></td>
+    <td>{% if r.user_set %}<span class="pill t-ok">지정</span>{% elif r.prev_cal_days is none %}<span class="pill t-warn">신규</span>{% else %}<span class="pill s-대기">환산</span>{% endif %}</td>
+    <td class="n">{{ (r.prev_cal_days ~ '일') if r.prev_cal_days is not none else '신규' }}</td><td>{{ r.prev_due | daylabel }}</td><td>{{ r.due | daylabel }}</td><td class="small">{{ r.why }}</td></tr>{% endfor %}
+</table></div>
+
+{% for title, terms in sections %}{% set rows = terms if not nature else terms | selectattr('nature', 'equalto', nature) | list %}
+{% if rows %}
+<h2>{{ title }}</h2>
+<div class="scroll"><table>
+  <tr><th style="width:110px">코드</th><th style="width:180px">이름</th><th>한 줄 설명</th><th style="width:90px">출처 성격</th><th>출처</th></tr>
+  {% for t in rows %}<tr id="{{ t.code | replace(' ', '_') }}"><td><b class="no-term">{{ t.code }}</b></td><td>{{ t.name }}</td><td>{{ t.short | terms }}</td>
+    <td><span class="pill {{ nature_class[t.nature] }}">{{ t.nature }}</span>{% if t.also %} + <span class="pill {{ nature_class[t.also] }}">{{ t.also }}</span>{% endif %}</td><td class="small muted no-term">{{ t.source | terms }}</td></tr>{% endfor %}
+</table></div>
+{% endif %}{% endfor %}
+{% endblock %}

@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}추적 {{ t.batch.batch_id }}{% endblock %}
+{% macro link(l) %}{% if l %}<span class="pill {{ 't-ok' if l.kind == '원본 키' else ('t-warn' if l.kind == '가정' else 's-claude') }}" title="{{ l.basis }}">{{ l.kind }}</span> <span class="small muted">{{ l.basis | terms }}</span>{% endif %}{% endmacro %}
+{% block body %}
+{% set b = t.batch %}
+<h1>배치 추적 {{ b.batch_id }} {% if t.state %}<span class="pill s-{{ t.state.state }}">{{ t.state.state }}</span>{% endif %}
+  {% if t.state and t.state.investigate_flag %}<span class="pill s-조사대상">조사대상</span>{% endif %}</h1>
+<p class="muted">{{ b.product_id }} · {{ b.production_line }} · 생산 {{ b.production_date }} · 생산량 {{ b.produced_qty | int | num }} · 원본 QC 결과 {{ b.qc_result }}
+  {% if t.a %}· 확정 불량률 {{ t.a.rate_prod | pct }} / {{ t.a.rate_ship | pct }}{% endif %} · <a href="/batches/{{ b.batch_id }}">배치 상세</a></p>
+<p class="small">연결 근거:
+  <span class="pill t-ok">원본 키</span> 원본 CSV의 키로 직접 연결 ·
+  <span class="pill t-warn">가정</span> 설계 가정(A-x)으로 만든 연결 ·
+  <span class="pill s-claude">앱 추가</span> 화면 접수·회신으로 앱이 추가(원본 불변)</p>
+
+<h2>흐름</h2>
+<div class="card">
+<ul class="tight" style="list-style:none;padding-left:0">
+  <li>① <b>클레임 {{ t.claims | length }}건</b> — 원본 {{ t.counts.claims_src }} · 앱 추가 {{ t.counts.claims_added }}
+    · 확정 {{ t.claims | selectattr('defect_confirmed', 'equalto', 'True') | list | length }}건</li>
+  <li style="padding-left:16px">↓ {% if t.counts.claims_src %}<span class="pill t-ok">원본 키</span> <span class="small muted">{{ "qc_claims_cv.batch_id" | terms }}</span>{% endif %}
+    {% if t.counts.claims_added %}{{ '+ ' if t.counts.claims_src }}<span class="pill s-claude">앱 추가</span> <span class="small muted">{{ "claim_addition.batch_id" | terms }}</span>{% endif %}
+    {% if not t.claims %}<span class="small muted">클레임 없음</span>{% endif %}</li>
+  <li>② <b>배치 {{ b.batch_id }}</b> {% if t.state %}<span class="pill s-{{ t.state.state }}">{{ t.state.state }}</span>{% endif %}</li>
+  <li style="padding-left:16px">↓ {{ link(t.lot_link) }}</li>
+  <li>③ <b>원료 로트 <a href="/lots/{{ b.input_lot_ids }}">{{ b.input_lot_ids }}</a></b>
+    {% if t.lot %}· {{ t.lot.material_id }} · 공급처 {{ t.lot.supplier_id }} · 입고검사 {{ t.lot.inspection_result }}{% endif %}
+    {% if t.lot_state %}<span class="pill t-{{ t.lot_state.state | tone }}">{{ t.lot_state.state }}</span>{% endif %}</li>
+  <li style="padding-left:16px">↓ <span class="pill t-ok">원본 키</span> <span class="small muted">{{ "같은 input_lot_ids" | terms }}</span></li>
+  <li>④ <b>같은 로트 배치 {{ t.same_lot | length }}개</b> — {% for r in t.same_lot %}<a href="/trace/{{ r.batch_id }}">{{ r.batch_id }}</a>({{ r.state }}){{ ', ' if not loop.last }}{% endfor %}</li>
+  <li style="padding-left:16px">↓ <span class="pill t-ok">원본 키</span> <span class="small muted">{{ "shipment_batch_link_cv.batch_id" | terms }}</span>
+    {% if t.counts.ships_added %}+ <span class="pill s-claude">앱 추가</span> <span class="small muted">확인 회신 {{ t.counts.ships_added }}건(A-21)</span>{% endif %}</li>
+  <li>⑤ <b>출하 {{ t.shipments | length }}건</b> — SBL {{ t.counts.ships_src }}건{% if t.counts.ships_added %} · 확인 회신 {{ t.counts.ships_added }}건{% endif %}
+    · {{ t.shipments | sum(attribute='shipped_qty') | num }}EA</li>
+  <li style="padding-left:16px">↓ <span class="pill t-ok">원본 키</span> <span class="small muted">{{ "shipment_batch_link_cv.customer_id" | terms }}</span>
+    {% if t.counts.customers_unlinked %}+ <span class="pill t-warn">가정</span> <span class="small muted">출하 연결 미확인 {{ t.counts.customers_unlinked }}곳(R10)</span>{% endif %}</li>
+  <li>⑥ <b>고객 {{ t.customers | length }}곳</b></li>
+  <li style="padding-left:16px">↓</li>
+  <li>⑦ <b>관련 Task {{ t.tasks | length }}건</b> · 상신 {{ t.submissions | length }}건
+    {% if t.inventory %}· 사내 잔여재고 <span class="pill s-{{ t.inventory.state }} t-{{ t.inventory.state | tone }}">{{ t.inventory.state }}</span>{% endif %}</li>
+</ul>
+</div>
+
+<h2>① 클레임</h2>
+<div class="scroll"><table>
+  <tr><th>클레임</th><th>접수일</th><th>고객</th><th>유형</th><th>확정 여부(정정 반영)</th><th>수량</th><th>원본 처리 상태</th><th>연결 근거</th></tr>
+  {% for c in t.claims %}<tr><td>{{ c.claim_id }}</td><td>{{ c.claim_date }}</td><td>{{ c.customer_id }}</td><td>{{ c.claim_type }}</td>
+    <td>{{ c.defect_confirmed | conf }}</td><td class="n">{{ c.qty_affected | int | num }}</td><td>{{ c.status }}</td><td>{{ link(c.link) }}</td></tr>
+  {% else %}<tr><td colspan="8" class="muted">없음</td></tr>{% endfor %}
+</table></div>
+
+<h2>③④ 원료 로트 · 같은 로트 배치</h2>
+<div class="scroll"><table>
+  <tr><th>배치</th><th>생산일</th><th>생산량</th><th>원본 QC 결과</th><th>상태</th><th>조사대상</th><th>사내 재고</th><th>연결 근거</th></tr>
+  {% for r in t.same_lot %}<tr><td><a href="/trace/{{ r.batch_id }}">{{ r.batch_id }}</a></td><td>{{ r.production_date }}</td>
+    <td class="n">{{ r.produced_qty | num }}</td><td>{{ r.qc_result }}</td><td><span class="pill s-{{ r.state }}">{{ r.state }}</span></td>
+    <td class="small">{% if r.investigate_flag %}{{ r.investigate_reason }}<br>{{ link(r.flag_link) }}{% else %}-{% endif %}</td>
+    <td>{% if r.inv_state %}<span class="pill t-{{ r.inv_state | tone }}">{{ r.inv_state }}</span>{% endif %}
+      {% if r.alert_rate is not none %}<span class="pill t-bad">표본 경보 {{ r.alert_rate | pct }}</span>{% endif %}</td>
+    <td>{{ link(r.link) }}</td></tr>
+  {% else %}<tr><td colspan="8" class="muted">같은 로트를 쓴 다른 배치 없음</td></tr>{% endfor %}
+</table></div>
+
+<h2>⑤ 출하</h2>
+<div class="scroll"><table>
+  <tr><th>출하</th><th>고객</th><th>출하일</th><th>수량</th><th>상태</th><th>모니터링</th><th>연결 근거</th></tr>
+  {% for s in t.shipments %}<tr><td>{{ s.shipment_id }}</td><td>{{ s.customer_id }}</td><td>{{ s.ship_date or '-' }}</td>
+    <td class="n">{{ s.shipped_qty | num }}</td><td><span class="pill s-{{ s.state }}">{{ s.state }}</span></td>
+    <td>{% if s.watch %}<span class="pill t-warn">클레임 모니터링 강화</span>{% else %}-{% endif %}</td><td>{{ link(s.link) }}</td></tr>
+  {% else %}<tr><td colspan="7" class="muted">출하 기록 없음</td></tr>{% endfor %}
+</table></div>
+{% if t.inventory %}<p class="small">사내 잔여재고 {{ (t.inventory.measured_qty if t.inventory.measured_qty is not none else t.inventory.est_qty) | num }}EA
+  <span class="pill s-{{ t.inventory.state }} t-{{ t.inventory.state | tone }}">{{ t.inventory.state }}</span> {{ link(t.inventory.link) }}</p>{% endif %}
+
+<h2>⑥ 고객</h2>
+<div class="scroll"><table>
+  <tr><th>고객</th><th>출하</th><th>출하 수량</th><th>인도분 상태</th><th>확정 클레임</th><th>보유량 회신</th><th>비고</th><th>연결 근거</th></tr>
+  {% for c in t.customers %}<tr><td>{{ c.customer_id }} <span class="small muted">{{ c.customer_name or '' }}</span></td>
+    <td class="n">{{ c.shipments }}</td><td class="n">{{ c.shipped_qty | num }}</td>
+    <td>{% for s in c.states %}<span class="pill s-{{ s }}">{{ s }}</span> {% else %}-{% endfor %}</td>
+    <td class="n">{% if c.claims %}{{ c.claims }}건 {{ c.claim_qty | num }}EA{% else %}-{% endif %}</td>
+    <td>{% if c.holding is not none %}{{ c.holding | num }}EA {{ link(c.holding_link) }}{% else %}-{% endif %}</td>
+    <td class="small">{% if c.unlinked_state %}<span class="pill t-{{ c.unlinked_state | tone }}">{{ c.unlinked_state }}</span>{% endif %}
+      {% if c.watch %}<span class="pill t-warn">클레임 모니터링 강화</span>{% endif %}</td>
+    <td>{{ link(c.link) }}</td></tr>
+  {% else %}<tr><td colspan="8" class="muted">없음</td></tr>{% endfor %}
+</table></div>
+
+<h2>⑦ 상신 · 관련 Task</h2>
+{% for s in t.submissions %}<div><a href="/submissions/{{ s.id }}">{{ s.kind }} #{{ s.id }}</a> <span class="pill t-{{ s.status | tone }}">{{ s.status }}</span>
+  {% if s.decision %}— 의결 <span class="pill t-{{ s.decision.result | tone }}">{{ s.decision.result }}</span> <span class="small muted">{{ s.decision.decider }} · {{ s.decision.reason }}</span>{% else %}— 의결 전{% endif %}</div>
+{% else %}<p class="muted">상신 없음</p>{% endfor %}
+{% include "_tasks.html" %}
+{% endblock %}

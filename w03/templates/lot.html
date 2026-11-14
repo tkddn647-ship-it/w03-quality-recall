@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}로트 {{ comp.src.lot_id }}{% endblock %}
+{% block body %}
+<h1>원료 로트 {{ comp.src.lot_id }}
+  {% if comp.lot %}<span class="pill t-{{ comp.lot.state | tone }}">{{ comp.lot.state }}</span>{% else %}<span class="pill">사용가능</span>{% endif %}</h1>
+<p class="muted">{{ comp.src.material_id }} · 공급처 {{ comp.src.supplier_id }} · 입고 {{ comp.src.receipt_date }} · 입고검사 {{ comp.src.inspection_result }}
+  · 입고량 {{ comp.src.received_qty }}kg {% if comp.lot %}· 사유: {{ comp.lot.reason }}{% endif %}</p>
+<div class="banner"><b>필수 확장: 원료 로트 역추적</b> — 회수의결 배치와 같은 원료 로트를 쓴 합격 배치의 사내 잔여재고(가정 A-5)를
+  <b>출하 전 추가검사 필요</b>로 막고, 검사 회신으로 출하 가능 복귀 또는 클레임 등록·R1 재판정으로 넘깁니다. 이 로트는 사용 정지로 두고
+  재공급 조달 판정(M-B 가용 로트)에서 뺍니다. 확장 전에는 R6 '조사대상' 플래그만 붙었습니다.</div>
+
+{% set mock = comp.batches | selectattr('data_source') | map(attribute='data_source') | unique | list %}
+{% if mock %}<div class="banner"><b>모의 데이터</b> — 추가검사 회신 수치(검사 수량·불량 수량·표본 불량률)는 원본 데이터에 없는
+  <b>{{ mock | join(', ') }}</b>입니다. 실제 검사 결과가 아닙니다.</div>{% endif %}
+
+{% if clue %}
+<h2 id="clues">원인 조사 {{ clue.label }}</h2>
+<p class="small muted">로트 입고 {{ clue.receipt_date }} · 입고검사 {{ clue.inspection_date }} <b>{{ clue.inspection_result }}</b> · 입고량 {{ clue.received_kg | num }}kg ·
+  누적 투입 {{ clue.consumed_kg | num }}kg. 투입일을 입고일·입고검사일과 비교한 결과이며 원인 판정이 아닙니다.</p>
+<div class="scroll"><table>
+  <tr><th>배치</th><th>투입일</th><th>투입량(kg)</th><th>투입 시점</th><th>배치 상태</th></tr>
+  {% for u in clue.uses %}<tr><td><a href="/trace/{{ u.batch_id }}">{{ u.batch_id }}</a></td><td>{{ u.consumption_date }}</td><td class="n">{{ u.kg | num }}</td>
+    <td>{% if u.timing != '입고검사 후 투입' %}<span class="pill t-warn">{{ u.timing }}</span>{% else %}{{ u.timing }}{% endif %}</td>
+    <td><span class="pill s-{{ u.state }}">{{ u.state }}</span></td></tr>{% endfor %}
+</table></div>
+<ul class="tight">{% for c in clue.clues %}<li>{{ c }}</li>{% endfor %}</ul>
+<p class="small"><b>데이터 한계</b></p>
+<ul class="tight small muted">{% for c in clue.limits %}<li>{{ c }}</li>{% endfor %}</ul>
+{% endif %}
+
+<h2>이 로트를 쓴 배치</h2>
+<div class="scroll"><table>
+  <tr><th>배치</th><th>생산일</th><th>생산량</th><th>원본 QC 결과</th><th>배치 상태</th><th>확정 불량률(생산/출하)</th><th>사내 잔여재고</th><th>재고 상태</th><th>표본 불량률 경보</th></tr>
+  {% for b in comp.batches %}<tr><td><a href="/batches/{{ b.batch_id }}">{{ b.batch_id }}</a></td><td>{{ b.production_date }}</td>
+    <td class="n">{{ b.produced_qty | num }}</td><td>{{ b.qc_result }}</td>
+    <td><span class="pill s-{{ b.batch_state }}">{{ b.batch_state }}</span></td>
+    <td class="n">{{ b.rate_prod | pct }} / {{ b.rate_ship | pct }}</td>
+    <td class="n">{% if b.est_qty is not none %}{{ (b.measured_qty if b.measured_qty is not none else b.est_qty) | num }}
+      <span class="small muted">{{ ('검사 ' ~ b.data_source) if b.data_source else ('실측' if b.measured_qty is not none else '추정') }}</span>{% else %}-{% endif %}</td>
+    <td>{% if b.inv_state %}<span class="pill s-{{ b.inv_state }} t-{{ b.inv_state | tone }}">{{ b.inv_state }}</span>
+      <span class="small muted">{{ '역추적' if b.kind == 'trace' else '회수' }}{{ ' · 격리 유지' if b.inv_state == '검사불합격' }}</span>{% else %}-{% endif %}</td>
+    <td>{% if b.alert_rate is not none %}<span class="pill t-bad">경보 {{ b.alert_rate | pct }}</span>
+      <span class="small muted">{{ b.defect_qty | num }}/{{ b.inspected_qty | num }} 표본 · 모의</span>{% else %}-{% endif %}</td></tr>{% endfor %}
+</table></div>
+
+{% if comp.rows %}
+<h2>확장이 없을 때 vs 있을 때 <a class="small" href="/plans/{{ comp.sid }}">재공급 계획 #{{ comp.sid }}</a></h2>
+<div class="scroll"><table>
+  <tr><th>항목</th><th>확장 없음 (같은 로트 재고를 정상 재고로 취급)</th><th>확장 있음 (현재)</th><th>설명</th></tr>
+  {% for r in comp.rows %}<tr><td>{{ r.label }}</td>
+    <td class="n">{{ r.without | num if r.without is number else r.without }}</td>
+    <td class="n"><b>{{ r.with | num if r.with is number else r.with }}</b></td><td class="small">{{ r.note }}</td></tr>{% endfor %}
+</table></div>
+<p class="small muted">재공급 필요량에서는 재공급에 쓸 수 있는 완제품 재고(같은 로트 재고 중 추가검사 합격분)만 뺍니다(가정 A-22). 다른 PL-02 배치 잔여는 재고 위치·보유가 확인되지 않아 반영하지 않습니다.</p>
+{% endif %}
+
+<p class="small muted">추가검사 불합격 시 회수 판정은 R1(배치 생산량·출하량 분모)대로 유지합니다. 표본 불량률은 배치 전체로 외삽하지 않고
+  <b>경보</b>로만 씁니다 — 불합격 재고 격리 유지 + 폐기 검토, 품질위원회 보고(회수 의결 아님), 기출하 고객 클레임 모니터링 강화(가정 A-27).</p>
+
+<h2>추가검사 · 후속 Task</h2>
+{% include "_tasks.html" %}
+
+<h2>이력</h2>
+{% include "_history.html" %}
+{% endblock %}

@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}외부 정보 접수{% endblock %}
+{% block body %}
+<h1>외부 정보 접수 (언론 보도)</h1>
+<div class="banner"><b>회수 근거가 아닙니다(R5).</b> 보도를 넣으면 회수대상·회수의결 배치의 판단을 다시 검토하지만, 판정은 확정 클레임 기준(R1)으로만 정해지므로
+  그대로 유지되고 그 근거가 이력에 남습니다. 보도가 특정 배치를 지목하지 않으면 품질팀 <b>모니터링 작업</b>만, 지목하면 그 배치의 <b>사실 확인 작업</b>을 만듭니다.
+  원본 데이터는 바꾸지 않습니다(모의 입력).</div>
+
+{% if last %}
+<div class="card"><b>{{ last.external_id }} 접수 완료</b> — 판단 재검토 {{ last.reviewed | length }}개 배치:
+  {% for r in last.reviewed %}{{ r.batch_id }}({{ r.state }}, {{ '판정 유지' if r.is_target else '기준 미달 — 회수대상 아님' }}){{ ', ' if not loop.last }}{% endfor %}
+  · 생성 작업 {{ last.tasks | length }}건 ({{ '보도 지목 배치 사실 확인' if last.named else '외부 정보 모니터링' }}) — <a href="/#tasks">작업 보기</a></div>
+{% endif %}
+
+<form method="post" action="/external" class="card">
+  <div class="grid2">
+    <label>출처(매체) <input type="text" name="source" required placeholder="예: 온라인 매체 A"></label>
+    <label>보도일 <input type="date" name="published_date" required max="{{ today }}"></label>
+    <label>적용일 (기본 현재 업무일) <input type="date" name="applied_date" value="{{ today }}" max="{{ today }}" required></label>
+    <label>지목 제품 (없으면 비움) <select name="product_id"><option value="">지목 없음</option>
+      {% for p in products %}<option value="{{ p.product_id }}">{{ p.product_id }} · {{ p.product_name }}</option>{% endfor %}</select></label>
+    <label>지목 배치 (쉼표로 구분, 없으면 비움) <input type="text" name="batch_ids" placeholder="예: B-02-2602-01"></label>
+    <label>접수자 (필수) <input type="text" name="actor" required placeholder="예: 품질팀 홍길동"></label>
+  </div>
+  <label>내용 요약 (필수) <textarea name="summary" rows="2" required placeholder="예: 일부 소비자 트러블 사례가 있는 것으로 알려졌다(미확정)"></textarea></label>
+  <p style="margin-bottom:0"><button class="primary">접수 · 판단 재검토</button></p>
+</form>
+
+<h2>접수한 외부 정보</h2>
+<div class="scroll"><table>
+  <tr><th>ID</th><th>출처</th><th>보도일</th><th>적용일</th><th>지목</th><th>내용</th><th>접수자</th></tr>
+  {% for e in items %}<tr><td>{{ e.id }}</td><td>{{ e.source }}</td><td>{{ e.published_date }}</td><td>{{ e.applied_date | daylabel }}</td>
+    <td class="small">{{ (e.batch_ids | fromjson | join(', ')) or (e.product_id ~ ' (배치 지목 없음)' if e.product_id else '지목 없음') }}</td>
+    <td class="small">{{ e.summary }}</td><td>{{ e.actor }}</td></tr>
+  {% else %}<tr><td colspan="7" class="muted">아직 없음</td></tr>{% endfor %}
+</table></div>
+{% endblock %}

@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+{% block title %}재공급 계획 #{{ sid }}{% endblock %}
+{% block body %}
+{% set p = comp.resupply.production %}{% set m = comp.resupply.material %}{% set plan = comp.plan %}
+{% set A = comp.a %}{% set B = comp.b %}{% set C = comp.c %}
+<h1>재공급 계획 #{{ sid }} <span class="pill t-{{ plan.state | tone }}">{{ plan.state }}</span></h1>
+<p class="muted"><a href="/submissions/{{ sid }}">상신 #{{ sid }}</a>
+  {% for l in comp.resupply.material.stopped_lots %} · <a href="/lots/{{ l }}">로트 {{ l }} 사용정지 · 역추적</a>{% endfor %} · 회수의결 배치 {{ comp.active_batches | join(', ') or '없음(재검토 대기)' }}
+  · 모든 승인·동의·회신은 <b>모의 회신</b>이며 외부 발송 없음</p>
+
+<h2>R8 재공급 판정</h2>
+<div class="grid2">
+  <div class="card"><b>(가) 생산 {{ p.line_id }}</b> <span class="pill s-{{ p.result }}">{{ p.result }}</span>
+    <table style="margin-top:6px">
+      <tr><td>필요량</td><td class="n"><b>{{ p.need_qty | num }}</b> EA</td><td class="small">{{ p.need_basis }}</td></tr>
+      {% if p.stock_offset_qty or p.stock_blocked_qty %}<tr><td>재공급 가능 재고</td><td class="n">{{ p.stock_offset_qty | num }} EA</td>
+        <td class="small">같은 로트 추가검사 합격분(A-22) · 검사 대기·불합격 {{ p.stock_blocked_qty | num }}EA는 제외</td></tr>{% endif %}
+      <tr><td>여유량</td><td class="n"><b>{{ p.spare_qty | num }}</b> EA</td><td class="small">{{ p.capacity_qty | num }} × (1 − {{ p.utilization_pct }}%) · {{ p.source | terms }}</td></tr>
+      <tr><td>필요 ÷ 여유</td><td class="n"><b>{{ p.periods_needed }}</b></td><td class="small">{{ p.rule }}</td></tr>
+    </table>
+    <p class="small muted">{{ p.capacity_period }}</p>
+  </div>
+  <div class="card"><b>(나) 조달 {{ m.material_id }}</b> <span class="pill s-{{ m.result }}">{{ m.result }}</span>
+    <div>공급처 {{ m.supplier_id }}{{ ' (독점)' if m.is_exclusive }} · {{ m.contract_type }}</div>
+    {% if m.stopped_lots %}<div>사용 정지 로트(제외): {{ m.stopped_lots | join(', ') }}</div>{% endif %}
+    <div>사용 가능 로트 {{ m.usable_lots | join(', ') or '없음' }} · 입고예정 PO {{ m.pending_pos | map(attribute='po_id') | join(', ') or '없음' }}</div>
+    <div class="small muted">{{ m.note }}</div>
+    <div class="small">종합 판정 <span class="pill s-{{ comp.resupply.overall }}">{{ comp.resupply.overall }}</span> (생산·조달 중 더 나쁜 쪽)</div>
+  </div>
+</div>
+
+<h2>대안 순차 적용 — (b) → (a) → (c)</h2>
+<p class="small muted">앞 단계에서 남은 부족분만 다음 단계로 넘깁니다. 진행 전 단계는 <b>예상치</b>(전원 동의·회신 현재값 기준), 끝난 단계는 <b>확정치</b>입니다.</p>
+<div class="scroll">
+<table>
+  <tr><th>단계</th><th>내용</th><th>단계 후 남는 부족분</th><th>영향 고객</th><th>지연 금액</th><th>필요한 승인</th><th>상태·행동</th></tr>
+  <tr><td>시작</td><td class="small">상한값 필요량 {{ comp.start.upper | num }} − 여유 {{ comp.start.spare | num }}</td>
+    <td class="n"><b>{{ comp.start.shortfall | num }}</b></td><td>-</td><td>-</td><td>-</td><td></td></tr>
+  <tr{% if comp.stage == 'b' %} style="background:var(--amberbg)"{% endif %}>
+    <td><b>(b)</b> {{ stages.b }}</td>
+    <td class="small">회신 {{ B.pairs - B.unreplied }}/{{ B.pairs }}건 · 축소 {{ B.reduction | num }}EA{% if p.stock_offset_qty %} (보유량 회신 {{ (B.reduction - p.stock_offset_qty) | num }} + 추가검사 합격 재고 {{ p.stock_offset_qty | num }}, A-22){% endif %} · 미회신 최대 {{ B.unreplied_qty | num }}EA(상한값 유지)</td>
+    <td class="n"><b>{{ B.after | num }}</b></td><td class="n">{{ B.customers }}곳(회신 요청)</td><td class="n">0</td>
+    <td class="small">{{ B.approval }}</td>
+    <td>{% if plan.state == '(b) 회신대기' %}
+      <form method="post" action="/plans/{{ sid }}/close-b" style="display:flex;gap:6px;flex-wrap:wrap">
+        <input type="text" name="actor" required value="영업 담당" style="width:100px">
+        <button class="sm primary">회신 마감 → 남은 부족분 (a)로</button></form>
+      {% elif comp.stage %}<span class="small muted">마감</span>{% endif %}</td>
+  </tr>
+  <tr{% if comp.stage == 'a' %} style="background:var(--amberbg)"{% endif %}>
+    <td><b>(a)</b> {{ stages.a }}</td>
+    <td class="small">대상 {{ B.after | num }}EA · {{ '동의 확정' if A.closed else '후보(전원 동의 가정)' }} {{ A.applied_qty | num }}EA
+      ({{ A.selected | length }}건{% if A.agreed.customers %}, 동의 {{ A.agreed.customers }}곳{% endif %})
+      {% if A.excluded_customers %}<div style="color:var(--red)">연기 거절로 제외: {{ A.excluded_customers | join(', ') }}</div>{% endif %}</td>
+    <td class="n"><b>이번 기간 {{ A.after | num }}</b>
+      {% if A.warning.periods %}<div style="color:var(--amber)">이후 {{ A.warning.periods }}기간 여유량 잠식</div>{% endif %}
+      {% if A.projected %}<div class="small muted">예상</div>{% endif %}</td>
+    <td class="n">{{ A.agreed.customers if A.closed else (A.customers | length) }}곳</td>
+    <td class="n">{{ (A.agreed.amount if A.closed else A.selected_amount) | eok }}</td>
+    <td class="small">{{ A.approval }}</td>
+    <td class="small">{% if comp.stage == 'a' %}{{ plan.state }} — 아래 Task에서 회신{% elif A.closed %}완료{% endif %}</td>
+  </tr>
+  <tr{% if comp.stage == 'c' %} style="background:var(--amberbg)"{% endif %}>
+    <td><b>(c)</b> {{ stages.c }}</td>
+    <td class="small">대상 {{ C.target | num }}EA
+      {% for o in C.options %}<div><b>{{ o.option_id }}</b> {{ o.option_type }} +{{ o.added_capacity_qty | num }}EA · {{ o.capex_krw | eok }} · {{ o.lead_time_weeks }}주
+        <span class="pill t-{{ o.status | tone }}">{{ o.status }}</span>
+        {% if o.conditions %}<span class="small">선행 조건: {{ o.conditions | join(' · ') }}</span>{% endif %}</div>{% endfor %}</td>
+    <td class="n"><b>{{ C.best_after | num }}</b><div class="small muted">선택 가능안 기준</div></td>
+    <td class="n">0곳</td><td class="n small">투자비 별도</td>
+    <td class="small">{{ C.approval }}</td>
+    <td>{% if plan.state == '(c) 선택대기' %}
+      <form method="post" action="/plans/{{ sid }}/choose-c" style="display:flex;gap:6px;flex-wrap:wrap">
+        <select name="option_id" required style="width:auto">{% for o in C.options if o.selectable %}<option value="{{ o.option_id }}">{{ o.option_id }} · {{ o.status }}</option>{% endfor %}</select>
+        <input type="text" name="actor" required value="생산기획 담당" style="width:100px">
+        <button class="sm primary">선택</button></form>
+      {% elif comp.stage == 'c' %}<span class="small">{{ plan.state }} — 아래 Task에서 회신</span>{% endif %}</td>
+  </tr>
+</table>
+</div>
+{% if plan.state == '대안확정' %}<div class="card" style="border-color:var(--green)">✓ <b>대안확정</b> — {{ comp.note }}</div>{% endif %}
+{% if plan.state == '대안소진' %}<div class="alert">모든 대안을 적용해도 부족분이 남습니다 — 경영 판단 필요(수량 축소 협의·재공급 일정 재약속).</div>{% endif %}
+
+<div class="banner"><b>⚠ 대안 (a) 경고 — {{ A17 }}</b><br>{{ A.warning.text }}.
+  (a)가 확정돼도 생산 Task의 이후 기간 여유량은 그만큼 줄어든 것으로 봐야 합니다.</div>
+
+{% if plan.state == '(b) 회신대기' %}
+<h2>(b) 고객 보유량 회신 입력 (모의)</h2>
+<form method="post" action="/plans/{{ sid }}/holding" class="card" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+  <select name="pair" required style="width:auto">{% for r in B.all %}<option value="{{ r.batch_id }}|{{ r.customer_id }}">{{ r.customer_id }} · {{ r.batch_id }} · 인도 {{ r.shipped | num }}EA{% if r.held_qty is not none %} · 회신 {{ r.held_qty | num }}{% endif %}</option>{% endfor %}</select>
+  <input type="number" name="held_qty" min="0" required placeholder="보유량(EA)" style="width:120px">
+  <input type="text" name="actor" required value="영업 담당" style="width:100px">
+  <button class="sm">회신 저장</button>
+  <span class="small muted">보유량 = 고객이 아직 갖고 있어 재공급이 필요한 수량. 미회신분은 상한값(A-8).</span>
+</form>
+{% endif %}
+
+<h2>대안 (a) 연기 대상 선정 기준</h2>
+<div class="card">
+  <div><b>{{ A.rule }}</b> — 기존 약속 중 덜 급한 것부터 미룬다.</div>
+  <div class="small">{{ A.basis }} <span class="tag">가정(원본 도출) A-11</span></div>
+  <table style="margin-top:6px;width:auto">
+    <tr><th>영업팀</th><th>주문→출하 소요일 중앙값</th><th>표본 수</th><th>범위</th></tr>
+    {% for team, s in A.lead_stats.items() %}<tr><td>{{ team }}</td><td class="n">{{ s.median_days }}일</td><td class="n">{{ s.n | num }}</td><td class="small">{{ s.min }}~{{ s.max }}일</td></tr>{% endfor %}
+  </table>
+  <p class="small muted">연기 후보 풀: 2026-07-01 기준 출하 기록 없는 PL-02 주문 중 추정 납기가 기준일 이후인 {{ A.pool_orders }}건 {{ A.pool_qty | num }}EA.
+    추정 납기가 이미 지난 {{ A.data_check | length }}건 {{ A.data_check_qty | num }}EA는 <b>데이터 확인 필요</b>로 분류해 후보에서 제외(A-12).</p>
+</div>
+
+<div class="grid2">
+  <div><b>연기 후보 (추정 납기 늦은 순)</b>
+    <div class="scroll" style="max-height:340px;overflow-y:auto"><table>
+      <tr><th>순번</th><th>주문</th><th>고객</th><th>팀</th><th>주문일</th><th>추정 납기</th><th>수량</th><th>금액</th></tr>
+      {% for o in A.selected %}<tr><td>{{ o.rank }}</td><td>{{ o.order_id }}</td><td>{{ o.customer_id }}</td><td>{{ o.sales_team }}</td>
+        <td class="small">{{ o.order_date }}</td><td class="small">{{ o.est_due }}</td><td class="n">{{ o.qty | num }}</td><td class="n small">{{ o.amount | eok }}</td></tr>
+      {% else %}<tr><td colspan="8" class="muted">남은 부족분 없음</td></tr>{% endfor %}
+    </table></div>
+  </div>
+  <div><b>영향 고객 · 동의 상태</b>
+    {% set req = {} %}{% for r in requests %}{% set _ = req.update({r.customer_id: r}) %}{% endfor %}
+    <table>
+      <tr><th>고객</th><th>주문</th><th>수량</th><th>금액</th><th>추정 납기</th><th>동의</th></tr>
+      {% for c in A.customers %}<tr><td>{{ c.customer_id }} {{ c.customer_name }}</td><td class="n">{{ c.orders }}</td>
+        <td class="n">{{ c.qty | num }}</td><td class="n small">{{ c.amount | eok }}</td><td class="small">{{ c.est_due_range | join('~') }}</td>
+        <td>{% if req.get(c.customer_id) %}<span class="pill t-{{ req[c.customer_id].state | tone }}">{{ req[c.customer_id].state }}</span>{% else %}-{% endif %}</td></tr>{% endfor %}
+      {% for r in requests if r.state in ('거절', '제외') %}<tr style="opacity:.6"><td>{{ r.customer_id }}</td><td colspan="4" class="small">{{ r.reply_reason or '' }}</td>
+        <td><span class="pill t-{{ r.state | tone }}">{{ r.state }}</span></td></tr>{% endfor %}
+    </table>
+  </div>
+</div>
+
+<h2>데이터 확인 필요 — 추정 납기 경과 미출하 주문 {{ A.data_check | length }}건</h2>
+<div class="scroll" style="max-height:260px;overflow-y:auto"><table>
+  <tr><th>주문</th><th>고객</th><th>팀</th><th>주문일</th><th>추정 납기</th><th>수량</th><th>금액</th></tr>
+  {% for o in A.data_check %}<tr><td>{{ o.order_id }}</td><td>{{ o.customer_id }}</td><td>{{ o.sales_team }}</td><td class="small">{{ o.order_date }}</td>
+    <td class="small">{{ o.est_due }}</td><td class="n">{{ o.qty | num }}</td><td class="n small">{{ o.amount | eok }}</td></tr>{% endfor %}
+</table></div>
+<p class="small muted">영업 '주문 상태 확인 요청' Task에 같은 목록이 첨부됩니다(취소·출하 누락·보류 여부 확인).</p>
+
+<h2>승인·회신 Task</h2>
+{% include "_tasks.html" %}
+
+<h2>계획 이력</h2>
+{% include "_history.html" %}
+{% endblock %}

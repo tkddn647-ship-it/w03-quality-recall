@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}회신 #{{ row.id }}{% endblock %}
+{% block body %}
+<h1>회신 #{{ row.id }} <span class="pill t-{{ row.status | tone }}">{{ row.status }}</span></h1>
+<p class="muted">Task #{{ task.id }} [{{ task.dept }}] {{ task.type }} — {{ task.title }} · 접수 {{ row.created_at }} · 회신자 {{ row.submitted_by }}</p>
+
+<div class="grid2">
+  <div class="card"><b>① 회신 원문 (모의)</b>
+    <p style="white-space:pre-wrap">{{ row.raw_text }}</p></div>
+  <div class="card"><b>② AI 구조화</b>
+    {% if row.source in AI_SOURCES %}<span class="pill s-claude">AI · {{ row.source | ailabel }} {{ info.model }}</span>{% if info.retries %} <span class="pill t-warn">503 자동 재시도 {{ info.retries }}회</span>{% endif %}
+    {% elif row.source == 'manual' %}<span class="pill t-ok">사람 작성</span>
+    {% else %}<span class="pill t-bad">AI 구조화 실패</span> <span class="small">{{ info.reason }}</span>{% endif %}
+    {% if structured %}<table style="margin-top:6px">
+      {% for f in spec.fields %}<tr><td>{{ spec.labels[f] }}</td><td>{{ structured[f] | yn if structured[f] is not none else '— (없음)' }}</td></tr>{% endfor %}
+      {% if structured.evidence %}<tr><td>근거 문장</td><td class="small">{{ structured.evidence }}</td></tr>{% endif %}
+    </table>{% endif %}</div>
+</div>
+
+<h2>③ 규칙 엔진 검증</h2>
+{% if v.ok %}<div class="card" style="border-color:var(--green)">✓ 검증 통과 — 필수 항목·Task 대상 일치·수량 한도{{ '·원문 수량 대조' if row.source in AI_SOURCES }} 확인
+  {% if v.notes %}<ul class="tight small">{% for n in v.notes %}<li>{{ n }}</li>{% endfor %}</ul>{% endif %}</div>
+{% else %}<div class="alert"><b>사람 확인 필요</b><ul class="tight">{% for p in v.problems %}<li>{{ p }}</li>{% endfor %}</ul></div>{% endif %}
+<table style="width:auto"><tr><th>항목</th><th>검증에 쓴 값</th></tr>
+  {% for f in spec.fields %}<tr><td>{{ spec.labels[f] }}</td><td>{{ v.data[f] | yn if v.data[f] is not none else '—' }}</td></tr>{% endfor %}</table>
+
+{% if row.status == '검증 통과' %}
+<h2>④ 반영</h2>
+<form method="post" action="/intakes/{{ row.id }}/apply" class="card" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+  <input type="text" name="actor" required value="{{ task.dept }} 담당자" style="width:160px">
+  <button class="primary">반영 — Task 상태 갱신</button>
+  <span class="small muted">반영하면 {{ spec.label }} 처리(보유량·필요량·R8 재계산 등)가 실행되고 반영자가 기록됩니다.</span>
+</form>
+{% elif row.status == '반영' %}
+<div class="card">반영 완료 — {{ row.applied_by }} · {{ row.applied_at }}</div>
+{% endif %}
+
+{% if row.status == '사람 확인 필요' %}
+<h2>구조화 폼 직접 작성 (사람 확인)</h2>
+<form method="post" action="/intakes/{{ row.id }}/manual" class="card">
+  <p class="small muted" style="margin-top:0">원문을 보고 값을 채우세요. 저장하면 같은 규칙으로 다시 검증합니다.</p>
+  <div class="grid2">
+  {% for f, kind in spec.fields.items() %}{% set cur = v.data[f] %}
+    <label>{{ spec.labels[f] }}
+    {% if kind == 'bool' %}<select name="{{ f }}"><option value="">—</option>
+        <option value="true" {{ 'selected' if cur == true }}>예</option><option value="false" {{ 'selected' if cur == false }}>아니오</option></select>
+    {% elif kind is not string %}<select name="{{ f }}"><option value="">—</option>{% for o in kind %}<option {{ 'selected' if cur == o }}>{{ o }}</option>{% endfor %}</select>
+    {% else %}<input type="text" name="{{ f }}" value="{{ cur if cur is not none else '' }}">{% endif %}</label>
+  {% endfor %}
+    <label>작성자 (필수) <input type="text" name="actor" required placeholder="예: 영업 담당 홍길동"></label>
+  </div>
+  <p style="margin-bottom:0"><button class="primary">저장 · 재검증</button></p>
+</form>
+{% endif %}
+
+<h2>이력 (원문 · AI 구조화 · 검증 · 반영)</h2>
+{% include "_history.html" %}
+{% endblock %}

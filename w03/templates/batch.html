@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}{{ state.batch_id }}{% endblock %}
+{% block body %}
+<h1>배치 {{ state.batch_id }} <span class="pill s-{{ state.state }}">{{ state.state }}</span>
+  {% if state.investigate_flag %}<span class="pill s-조사대상">조사대상</span>{% endif %}</h1>
+<p class="muted">{{ batch.product_id }} · {{ batch.production_line }} · 생산 {{ batch.production_date }} · 로트 {{ batch.input_lot_ids }} · 원본 QC 결과 {{ batch.qc_result }}
+  {% if state.investigate_reason %}· {{ state.investigate_reason }}{% endif %}
+  {% if state.review_from %}· 재검토 전 상태 {{ state.review_from }}{% endif %}
+  · <a href="/trace/{{ state.batch_id }}">배치 추적(클레임→로트→출하→고객→Task)</a></p>
+
+{% if a %}
+<div class="row">
+  <div class="card"><div class="muted small">확정 불량 (클레임 {{ a.confirmed_claims }}건{{ ', 정정 반영' if corrections }})</div><b>{{ a.confirmed_qty | num }} EA</b></div>
+  <div class="card"><div class="muted small">불량률 · 분모 생산량 {{ a.produced_qty | num }}</div><b>{{ a.rate_prod | pct }}</b> {{ '≥ 10%' if a.recall_prod else '< 10%' }}</div>
+  <div class="card"><div class="muted small">불량률 · 분모 출하량 {{ a.shipped_qty | num }}</div><b>{{ a.rate_ship | pct }}</b> {{ '≥ 10%' if a.recall_ship else '< 10%' }}</div>
+</div>
+{% if a.warning %}<p style="color:var(--amber)">{{ a.warning }}</p>{% endif %}
+{% endif %}
+
+{% if alert %}
+<div class="banner" style="border-left-color:var(--red);background:var(--redbg)">
+  <b>표본 불량률 경보</b> <span class="pill t-bad">{{ alert.rate_pct | pct }}</span>
+  — 추가검사 표본 불량 {{ alert.defect_qty | num }} / 검사 {{ alert.inspected_qty | num }}EA.
+  회수 판정은 R1(위 두 분모) 그대로이며, 이 경보는 <b>품질위원회 보고</b>(Task #{{ alert.report_task_id }}, 회수 의결 아님)와
+  불합격 재고 <b>격리 유지 · 폐기 검토</b>(Task #{{ alert.dispose_task_id }})로 이어집니다.
+  기출하 고객 {{ watch | length }}곳은 <b>클레임 모니터링 강화</b> 대상입니다.
+  <div class="small muted" style="margin-top:4px">검사 수치는 {{ alert.data_source }}입니다(원본에 검사 데이터 없음). <a href="/lots/{{ alert.lot_id }}">로트 역추적</a></div>
+</div>
+{% endif %}
+
+<h2>클레임 (유효값 = 원본 + 최신 정정)</h2>
+<div class="scroll"><table>
+  <tr><th>클레임</th><th>접수일</th><th>고객</th><th>유형</th><th>확정 여부(정정 반영)</th><th>수량</th><th>원본 처리 상태</th><th>정정</th></tr>
+  {% for c in claims %}<tr>
+    <td>{{ c.claim_id }}</td><td>{{ c.claim_date }}</td><td>{{ c.customer_id }}</td><td>{{ c.claim_type }}</td>
+    <td>{{ c.defect_confirmed | conf }}{% if c.defect_confirmed != c.src_defect_confirmed %} <span class="small muted">(원본 {{ c.src_defect_confirmed | conf }})</span>{% endif %}</td>
+    <td class="n">{{ c.qty_affected | int | num }}{% if c.qty_affected != c.src_qty_affected %} <span class="small muted">(원본 {{ c.src_qty_affected | int | num }})</span>{% endif %}</td>
+    <td>{{ c.status }}</td><td>{% if c.corrections %}<span class="pill t-warn">정정 {{ c.corrections }}</span>{% endif %}</td></tr>
+  {% else %}<tr><td colspan="8" class="muted">없음</td></tr>{% endfor %}
+</table></div>
+
+{% if claims %}
+<h2>검사 정정 입력 (조건 변경)</h2>
+<form method="post" action="/corrections" class="card">
+  <p class="small muted" style="margin-top:0">원본은 바꾸지 않고 정정 테이블에 원본값·정정 전값·정정값을 함께 보관합니다. 저장하면 이 배치의 불량률을 두 분모로 다시 계산해
+    <b>여전히 10% 이상이면 판정 유지(유지 근거 기록)</b>, <b>미만이면 재검토 → 위원회 재상신</b>으로 넘어갑니다.</p>
+  <div class="grid2">
+    <label>클레임 <select name="claim_id" required>
+      {% for c in claims %}<option value="{{ c.claim_id }}">{{ c.claim_id }} · {{ c.customer_id }} · {{ c.defect_confirmed | conf }} · {{ c.qty_affected | int | num }}EA</option>{% endfor %}
+    </select></label>
+    <label>확정 여부 정정 <select name="new_confirmed">
+      <option value="">변경 없음</option><option value="True">확정(True)</option><option value="False">미확정(False)</option></select></label>
+    <label>영향 수량 정정(EA, 비우면 변경 없음) <input type="text" name="new_qty" inputmode="numeric" pattern="[0-9]*"></label>
+    <label>정정자 (필수) <input type="text" name="corrector" required placeholder="예: 품질팀 홍길동"></label>
+    <label>사유 (필수) <input type="text" name="reason" required placeholder="예: 재검사 결과 규격이탈 아님"></label>
+    <label>근거 (필수) <input type="text" name="evidence" required placeholder="예: 재검사 성적서 #RT-0701-03"></label>
+  </div>
+  <input type="hidden" name="next" value="/batches/{{ state.batch_id }}">
+  <p style="margin-bottom:0"><button class="primary">정정 저장 · 재검증</button></p>
+</form>
+{% endif %}
+
+{% if corrections %}
+<h2>정정 내역</h2>
+<div class="scroll"><table>
+  <tr><th>#</th><th>시각(실제)</th><th>클레임</th><th>항목</th><th>원본값</th><th>정정 전</th><th>정정값</th><th>정정자</th><th>사유</th><th>근거</th></tr>
+  {% for k in corrections %}<tr><td>{{ k.id }}</td><td class="small">{{ k.created_at }}</td><td>{{ k.claim_id }}</td>
+    <td>{{ '확정 여부' if k.field == 'defect_confirmed' else '영향 수량' }}</td><td>{{ k.original_value | conf }}</td>
+    <td>{{ k.previous_value | conf }}</td><td><b>{{ k.corrected_value | conf }}</b></td><td>{{ k.corrector }}</td>
+    <td class="small">{{ k.reason }}</td><td class="small">{{ k.evidence }}</td></tr>{% endfor %}
+</table></div>
+{% endif %}
+
+<h2>고객 인도분 (SBL)</h2>
+<div class="scroll"><table>
+  <tr><th>출하</th><th>고객</th><th>출하일</th><th>수량</th><th>상태</th><th>모니터링</th></tr>
+  {% for s in ships %}<tr><td>{{ s.shipment_id }}</td><td>{{ s.customer_id }}</td><td>{{ s.ship_date or '- (확인 회신)' }}</td>
+    <td class="n">{{ s.shipped_qty | num }}</td><td><span class="pill s-{{ s.state }}">{{ s.state }}</span></td>
+    <td>{% if s.watch %}<span class="pill t-warn">클레임 모니터링 강화</span>{% else %}-{% endif %}</td></tr>
+  {% else %}<tr><td colspan="6" class="muted">SBL 연결 출하 없음</td></tr>{% endfor %}
+</table></div>
+
+<h2>이 배치의 처리 이력</h2>
+{% include "_history.html" %}
+{% endblock %}

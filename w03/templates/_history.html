@@ -1,0 +1,17 @@
+<div class="scroll">
+<table>
+  <tr><th>#</th><th>기록 시각(실제)</th><th>업무 기준일(가상)</th><th>대상</th><th>변경</th><th>누가</th><th>근거</th></tr>
+  {% for h in history %}
+  <tr>
+    <td>{{ h.id }}</td><td class="small" style="white-space:nowrap">{{ h.at }}</td>
+    <td class="small" style="white-space:nowrap">{{ h.business_date }}</td>
+    <td class="small">{{ h.entity_type | entity }} <b>{{ h.entity_id }}</b></td>
+    <td>{% if h.from_state %}<span class="pill s-{{ h.from_state }} t-{{ h.from_state | tone }}">{{ h.from_state }}</span> → {% endif %}<span class="pill s-{{ h.to_state }} t-{{ h.to_state | tone }}">{{ h.to_state }}</span></td>
+    <td class="small"><span class="tag">{{ h.actor_type }}</span> {{ h.actor }}</td>
+    <td class="small">{{ h.reason | terms }}</td>
+  </tr>
+  {% else %}
+  <tr><td colspan="7" class="muted">이력 없음</td></tr>
+  {% endfor %}
+</table>
+</div>

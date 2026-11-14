@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}W03 품질·공급 복구{% endblock %}</title>
+<style>
+  :root { --fg:#1d2430; --muted:#5d6878; --line:#dde2ea; --bg:#f6f7f9; --card:#fff;
+          --red:#b42318; --redbg:#fdecea; --amber:#9a6700; --amberbg:#fff4d6; --green:#1a7f37; --greenbg:#e6f4ea;
+          --blue:#1f4fa8; --bluebg:#e8effc; }
+  * { box-sizing: border-box; }
+  body { margin:0; font: 14px/1.55 system-ui, "Malgun Gothic", sans-serif; color:var(--fg); background:var(--bg); }
+  header { background:#1d2430; color:#fff; padding:12px 20px; display:flex; gap:20px; align-items:center; flex-wrap:wrap; }
+  header a { color:#cfd6e2; text-decoration:none; } header a:hover { color:#fff; }
+  header strong { font-size:15px; }
+  main { max-width:1200px; margin:0 auto; padding:20px 16px 60px; }
+  h1 { font-size:20px; margin:0 0 4px; } h2 { font-size:16px; margin:28px 0 10px; }
+  .muted { color:var(--muted); } .small { font-size:12px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:14px 16px; margin:10px 0; }
+  .row { display:flex; gap:12px; flex-wrap:wrap; } .row > .card { flex:1 1 220px; margin:0; }
+  table { width:100%; border-collapse:collapse; background:var(--card); border:1px solid var(--line); }
+  th, td { padding:7px 9px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; }
+  th { background:#eef1f5; font-weight:600; font-size:13px; white-space:nowrap; }
+  td.n { text-align:right; font-variant-numeric: tabular-nums; white-space:nowrap; }
+  .scroll { overflow-x:auto; }
+  .pill { display:inline-block; padding:1px 8px; border-radius:10px; font-size:12px; font-weight:600; white-space:nowrap;
+          background:#eef1f5; color:var(--muted); }
+  .s-회수대상, .s-회수요청, .s-출하보류, .s-대안필요 { background:var(--redbg); color:var(--red); }
+  .s-회수의결, .s-진행, .s-지연, .s-상신, .s-조사대상, .s-보류, .s-재검토 { background:var(--amberbg); color:var(--amber); }
+  .s-회수완료, .s-완료, .s-승인, .s-가능, .s-통과 { background:var(--greenbg); color:var(--green); }
+  .s-거절, .s-검증실패, .s-실패 { background:var(--redbg); color:var(--red); }
+  .s-대기, .s-claude { background:var(--bluebg); color:var(--blue); }
+  .t-ok { background:var(--greenbg); color:var(--green); } .t-warn { background:var(--amberbg); color:var(--amber); }
+  .t-bad { background:var(--redbg); color:var(--red); } .t-muted { background:#eef1f5; color:var(--muted); }
+  .banner { border-left:4px solid var(--amber); background:var(--amberbg); padding:8px 12px; border-radius:4px; margin:8px 0; }
+  .alert { border-left:4px solid var(--red); background:var(--redbg); padding:8px 12px; border-radius:4px; margin:8px 0; }
+  .tag { font-size:11px; padding:1px 6px; border-radius:4px; border:1px solid var(--line); color:var(--muted); margin-left:4px; }
+  button { font: inherit; padding:6px 14px; border-radius:6px; border:1px solid #9aa5b5; background:#fff; cursor:pointer; }
+  button.primary { background:#1f4fa8; color:#fff; border-color:#1f4fa8; }
+  button.danger { background:#fff; color:var(--red); border-color:var(--red); }
+  button.sm { padding:2px 10px; font-size:12px; }
+  form.inline { display:inline; }
+  label { display:block; margin:6px 0; font-size:13px; color:var(--muted); }
+  input[type=text], input[type=number], select, textarea { font:inherit; padding:6px 8px; border:1px solid #9aa5b5; border-radius:6px; width:100%; }
+  .grid2 { display:grid; grid-template-columns: 1fr 1fr; gap:12px; }
+  @media (max-width: 760px) { .grid2 { grid-template-columns: 1fr; } }
+  ul.tight { margin:6px 0; padding-left:20px; } ul.tight li { margin:2px 0; }
+  code { background:#eef1f5; padding:0 4px; border-radius:3px; font-size:12px; }
+  a.term { color:inherit; text-decoration:underline dotted; text-underline-offset:2px; cursor:help; }
+  .code-term { text-decoration:underline dotted; text-decoration-color:var(--muted, #999); text-underline-offset:2px; cursor:help; }
+  .request { border-left:4px solid var(--amber, #c80); }
+  .decide { border-left:4px solid var(--red); }
+  .decide ol { margin:6px 0 0; padding-left:0; list-style:none; }
+  .decide li { display:grid; grid-template-columns: 28px 64px 1fr; gap:8px; padding:8px 0; border-top:1px solid var(--line); }
+  .decide li:first-child { border-top:0; }
+  .decide .no { font-weight:700; color:var(--muted); text-align:right; }
+  .decide .why { color:var(--muted); font-size:13px; }
+  @media (max-width: 760px) { .decide li { grid-template-columns: 22px 1fr; } .decide li .u { grid-column: 2; } }
+</style>
+</head>
+<body>
+<header>
+  <strong>W03 품질 이슈·공급 복구</strong>
+  <a href="/">대시보드</a>
+  <a href="/history">처리 이력</a>
+  <a href="/effects">개선 효과</a>
+  <a href="/glossary">용어집</a>
+  <span class="small" style="margin-left:auto;color:#fff">업무일 <b id="business-date">{{ business_date_label() }}</b></span>
+  <span class="muted small" style="color:#9aa5b5">원본 기준일 2026-07-01 · 원본 읽기 전용 · 외부 발송 없음(모의 처리)</span>
+</header>
+<main>
+{% block body %}{% endblock %}
+</main>
+<script>
+/* 화면 텍스트의 규칙·가정 번호(R1, A-5, SBL …)에 한 줄 설명 툴팁과 용어집 링크를 붙인다. */
+(function () {
+  const TIPS = {{ GLOSSARY_TIPS | tojson }};
+  const codes = Object.keys(TIPS).sort((a, b) => b.length - a.length).map(c => c.replace(/[-]/g, "\\-"));
+  if (!codes.length) return;
+  const re = new RegExp("(?<![A-Za-z0-9-])(" + codes.join("|") + ")(?![A-Za-z0-9-])", "g");
+  const SKIP = new Set(["A", "SCRIPT", "STYLE", "TEXTAREA", "OPTION", "SELECT", "BUTTON", "INPUT", "TITLE", "CODE"]);
+  const walker = document.createTreeWalker(document.querySelector("main"), NodeFilter.SHOW_TEXT, {
+    acceptNode(n) {
+      for (let p = n.parentElement; p && p.tagName !== "MAIN"; p = p.parentElement)
+        if (SKIP.has(p.tagName) || p.classList.contains("no-term")) return NodeFilter.FILTER_REJECT;
+      re.lastIndex = 0;
+      return re.test(n.nodeValue) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP;
+    }
+  });
+  const nodes = [];
+  while (walker.nextNode()) nodes.push(walker.currentNode);
+  for (const n of nodes) {
+    const frag = document.createDocumentFragment();
+    let last = 0, m;
+    re.lastIndex = 0;
+    while ((m = re.exec(n.nodeValue))) {
+      frag.append(n.nodeValue.slice(last, m.index));
+      const a = document.createElement("a");
+      a.className = "term"; a.href = "/glossary#" + m[1]; a.title = TIPS[m[1]]; a.textContent = m[1];
+      frag.append(a);
+      last = m.index + m[1].length;
+    }
+    frag.append(n.nodeValue.slice(last));
+    n.replaceWith(frag);
+  }
+})();
+</script>
+</body>
+</html>

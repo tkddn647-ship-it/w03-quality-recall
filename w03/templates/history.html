@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}처리 이력{% endblock %}
+{% block body %}
+<h1>처리 이력</h1>
+<p class="muted">모든 상태 변경 1건 = 1행. <b>기록 시각(실제)</b>은 이 시스템에 기록된 실제 시각,
+  <b>업무 기준일(가상)</b>은 시나리오의 기준일(2026-07-01)입니다. 누가(시스템·AI·사람)와 근거를 함께 남깁니다.</p>
+<div class="scroll">
+<table>
+  <tr><th>#</th><th>기록 시각(실제)</th><th>업무 기준일(가상)</th><th>대상</th><th>변경</th><th>누가</th><th>근거</th></tr>
+  {% for h in rows %}
+  <tr>
+    <td>{{ h.id }}</td><td class="small" style="white-space:nowrap">{{ h.at }}</td>
+    <td class="small" style="white-space:nowrap">{{ h.business_date }}</td>
+    <td class="small">{{ h.entity_type | entity }} <b>{{ h.entity_id }}</b></td>
+    <td>{% if h.from_state %}<span class="pill s-{{ h.from_state }} t-{{ h.from_state | tone }}">{{ h.from_state }}</span> → {% endif %}<span class="pill s-{{ h.to_state }} t-{{ h.to_state | tone }}">{{ h.to_state }}</span></td>
+    <td class="small"><span class="tag">{{ h.actor_type }}</span> {{ h.actor }}</td>
+    <td class="small">{{ h.reason | terms }}
+      {% if h.evidence_json %}<details><summary class="muted">근거 데이터(시스템 기록 원문)</summary><pre class="small" style="white-space:pre-wrap;margin:4px 0">{{ h.evidence_json | prettyjson | terms }}</pre></details>{% endif %}</td>
+  </tr>
+  {% endfor %}
+</table>
+</div>
+{% endblock %}

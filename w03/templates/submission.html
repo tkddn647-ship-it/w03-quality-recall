@@ -1,0 +1,200 @@
+{% extends "base.html" %}
+{% block title %}상신 #{{ sub.id }}{% endblock %}
+{% block body %}
+{% set rs = facts.resupply %}
+<h1>품질위원회 {{ sub.kind }} #{{ sub.id }} <span class="pill t-{{ sub.status | tone }}">{{ sub.status }}</span></h1>
+{% if sub.kind == '재상신' %}<div class="banner"><b>재상신</b> — 검사 정정 후 회수 기준(10%) 미달이 된 배치의 <b>회수 해제 여부</b>를 묻습니다. 아래 수치는 정정 반영 후 재계산값입니다.</div>{% endif %}
+{% if plan %}<p><a href="/plans/{{ sub.id }}">→ 재공급 계획 #{{ sub.id }}</a> <span class="pill t-{{ plan.state | tone }}">{{ plan.state }}</span></p>{% endif %}
+<div class="card request" id="request"><span class="pill t-warn">요청 사항</span> <b>{{ req_line.headline }}</b>
+  <div class="small muted" style="margin-top:4px">위원회 의결 처리 목표 <b>{{ deadline.due | daylabel }}</b> (상신 {{ deadline.submitted | daylabel }} + 1영업일, A-32){% if sub.status == '상신' and pending %}
+    {% if deadline.late %} · <span class="pill t-bad">의결 지연 {{ deadline.late }}영업일</span>{% elif deadline.left == 0 %} · <span class="pill t-warn">오늘 마감</span>{% endif %}{% endif %}
+    {% if sub.kind == '회수상신' %} · 공급 판정은 상신 시점 계산값(R8){% endif %}</div></div>
+<p class="muted">상신 업무일 <b>{{ sub_business_date | daylabel }}</b> · 기록 시각(실제) {{ sub.created_at }} · 대상 배치 {{ facts.targets | map(attribute='batch_id') | join(', ') }}
+  · 회수 실행 권한: 품질위원회 (<span class="code-term" title="원래 이름: approval_authority_policy">승인권한 규정</span>, R3) · 원본 기준일 {{ facts.as_of }}</p>
+{% if changed %}<div class="alert"><b>⚠ 상신 이후 수치가 바뀌었습니다</b> (클레임 접수·검사 정정 반영) — 아래 요약·판정 근거는 <b>상신 시점 값</b>입니다.
+  <ul class="tight">{% for c in changed %}<li><a href="/batches/{{ c.batch_id }}">{{ c.batch_id }}</a> 확정 수량 {{ c.then_qty | num }} → <b>{{ c.now_qty | num }}EA</b>,
+    불량률 {{ c.then_prod | pct }} / {{ c.then_ship | pct }} → <b>{{ c.now_prod | pct }} / {{ c.now_ship | pct }}</b> (현재 {{ c.state }})</li>{% endfor %}</ul></div>{% endif %}
+
+<h2>상신 요약 <span class="pill t-{{ sub.ai_status | tone }}">{{ sub.ai_status }}</span>{% if check.stale %} <span class="pill t-bad">수치 변경으로 요약 갱신 필요</span>{% endif %}</h2>
+{% if check.stale %}<div class="alert" id="stale"><b>요약 작성 이후 수치가 바뀌었습니다</b> ({{ check.stale.causes | join(' · ') }}) —
+  아래 <b>판정 근거·영향 범위·요청 사항은 다시 계산한 최신 값</b>이고, 요약 문장은 이전 값 기준입니다.
+  <ul class="tight">{% for r in stale_rows %}{% if r.then and r.then.confirmed_qty != r.now.confirmed_qty %}<li>{{ r.batch_id }} 확정 수량 {{ r.then.confirmed_qty | num }} → <b>{{ r.now.confirmed_qty | num }}EA</b>,
+    불량률 {{ r.then.rate_prod | pct }} / {{ r.then.rate_ship | pct }} → <b>{{ r.now.rate_prod | pct }} / {{ r.now.rate_ship | pct }}</b></li>{% endif %}{% endfor %}</ul>
+  {% if sub.status == '상신' and pending %}<form method="post" action="/submissions/{{ sub.id }}/summary/regenerate" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:6px">
+    <input type="text" name="actor" required value="품질팀 담당자" style="width:160px">
+    <button class="primary">요약 다시 만들기 (AI 호출)</button>
+    <span class="small muted">최신 계산값으로 AI 요약을 다시 만듭니다. 실패하면 수동 작성 화면으로 바뀝니다. 의결은 지금 수치로도 할 수 있습니다.</span>
+  </form>{% endif %}</div>{% endif %}
+{% if sub.ai_status == STATUS_FAIL %}
+  <div class="alert"><b>AI 요약 실패</b> — {{ check.reason }}. 상신 요약을 사람이 작성해야 의결할 수 있습니다.</div>
+  <form method="post" action="/submissions/{{ sub.id }}/summary" class="card">
+    <p class="small muted" style="margin-top:0">아래는 규칙 엔진 계산값을 문장으로 옮긴 <b>초안</b>입니다. 검토·수정 후 저장하세요(작성자 기록).</p>
+    <label>작성자 <input type="text" name="author" required placeholder="예: 품질팀 홍길동"></label>
+    <label>제목 (요청 사항 형식) <input type="text" name="headline" value="{{ draft.headline }}"></label>
+    <label>요약 <textarea name="summary" rows="4" required>{{ draft.summary | plain }}</textarea></label>
+    <label>조치안 (한 줄에 하나, "부서: 조치")
+      <textarea name="actions" rows="5">{% for a in draft.actions %}{{ a.dept }}: {{ a.action }}
+{% endfor %}</textarea></label>
+    <label>정보 공백·확인 필요 (한 줄에 하나)
+      <textarea name="questions" rows="4">{% for q in draft.open_questions %}{{ q | plain }}
+{% endfor %}</textarea></label>
+    <p class="small muted">원인 조사 단서는 아래 '원료 로트' 칸에 따로 표시되므로 여기에 옮기지 않습니다.</p>
+    <p style="margin-bottom:0"><button class="primary">수동 요약 저장</button></p>
+  </form>
+{% elif ai %}
+  <div class="card">
+    <div class="small muted">
+      {% if sub.ai_source in AI_SOURCES %}출처 <span class="pill s-claude">AI · {{ sub.ai_source | ailabel }} {{ check.model }}</span>{% if check.retries %} <span class="pill t-warn">503 자동 재시도 {{ check.retries }}회</span>{% endif %}{% if check.wording_retries %} <span class="pill t-warn" title="{{ check.wording_retry_reasons | tojson }}">표현 경고로 자동 재생성 {{ check.wording_retries }}회</span>{% endif %} — 입력은 <span class="code-term" title="원래 이름: facts">규칙 엔진 계산값</span>뿐
+      {% elif sub.ai_source == 'rule' %}출처 <span class="pill t-ok">규칙 요약</span> (재상신 — 정정 내역·재계산 수치, AI 미사용)
+      {% else %}출처 <span class="pill t-ok">사람 작성</span> (AI 요약 실패 후 수동 작성){% endif %}
+    </div>
+    {% if check.problems %}{% set wording = check.problems | select('wording') | list %}{% set numeric = check.problems | reject('wording') | list %}
+      {% if numeric %}<div class="alert"><b>⚠ 수치 불일치 {{ numeric | length }}건</b> — 요약 속 수치를 원본 계산값과 대조한 결과입니다. 의결 전에 아래 판정 근거 표를 기준으로 확인하세요.
+        <ul class="tight">{% for p in numeric %}<li>{{ p }}</li>{% endfor %}</ul></div>{% endif %}
+      {% if wording %}<div class="alert"><b>⚠ 표현 경고 {{ wording | length }}건</b> — 의결 전 문서인데 회수가 진행·실행·결정된 것처럼 읽히는 문장입니다. 회수 실행은 위원회 의결 사항(R3)이니 그렇게 읽지 마세요.
+        <ul class="tight">{% for p in wording %}<li>{{ p }}</li>{% endfor %}</ul></div>{% endif %}
+    {% elif sub.ai_source in AI_SOURCES %}
+      <div class="small" style="color:var(--green)">✓ {% if ai.basis_lines %}수치·목록은 계산값을 그대로 넣었고, AI 문장 속 숫자·기준 표현도 계산값과 일치{% else %}인용 수치(불량률·확정 수량·고객별 수량·같은 로트 배치·본문 숫자)가 계산값과 일치{% endif %}</div>
+    {% endif %}
+    <h2 style="margin-top:8px">{{ ai.headline | terms }}</h2>
+    {% if ai.basis_lines %}<div class="small muted" style="margin-bottom:2px">계산값 (규칙 엔진 — 제목·수치·목록은 계산값을 그대로 넣음)</div>
+    <ul class="tight">{% for l in ai.basis_lines %}<li>{{ l | terms }}</li>{% endfor %}</ul>
+    <div class="small muted" style="margin-bottom:2px">{{ 'AI 문장' if sub.ai_source in AI_SOURCES else '요약' }}</div>{% endif %}
+    <p>{{ ai.summary | terms }}</p>
+    <div class="grid2">
+      <div><b>부서별 조치안 — 위원회 승인 시</b> <span class="small muted">(의결 전 · 아직 실행하지 않음)</span>
+        <ul class="tight">{% for a in ai.actions %}<li><b>{{ a.dept }}</b> — {{ a.action | terms }}</li>{% endfor %}</ul></div>
+      <div><b>정보 공백·확인 필요</b>
+        <ul class="tight">{% for q in questions %}<li>{{ q | terms }}</li>{% endfor %}
+          {% if n_clues %}<li><a href="#lot">원인 조사 단서 {{ n_clues }}건 → 아래 '원료 로트' 칸</a></li>{% endif %}
+          {% if not questions and not n_clues %}<li class="muted">없음</li>{% endif %}</ul></div>
+    </div>
+  </div>
+{% endif %}
+
+<h2>판정 근거 (규칙 엔진 계산값)</h2>
+<div class="scroll">
+<table>
+  <tr><th>배치</th><th>제품·라인</th><th>생산일</th><th>로트</th><th>확정 클레임</th><th>확정 수량</th>
+      <th>생산량</th><th>불량률(생산)</th><th>출하량(SBL)</th><th>불량률(출하)</th><th>원본 QC 결과</th></tr>
+  {% for t in facts.targets %}
+  <tr><td><a href="/batches/{{ t.batch_id }}">{{ t.batch_id }}</a></td><td>{{ t.product_id }} · {{ t.production_line }}</td>
+      <td>{{ t.production_date }}</td><td>{{ t.lot_id }}</td>
+      <td class="n">{{ t.confirmed_claims }}</td><td class="n">{{ t.confirmed_qty | num }}</td>
+      <td class="n">{{ t.produced_qty | num }}</td><td class="n"><b>{{ t.rate_prod | pct }}</b></td>
+      <td class="n">{{ t.shipped_qty | num }}</td><td class="n"><b>{{ t.rate_ship | pct }}</b></td><td>{{ t.qc_result }}</td></tr>
+  {% endfor %}
+</table>
+</div>
+<p class="small muted">규칙: {{ facts.rule | terms }}</p>
+
+<div class="grid2">
+  <div class="card" id="lot"><b>원료 로트 · 같은 로트 배치</b>
+    {% for l in facts.lot_info %}<div>{{ l.lot_id }} · {{ l.material_id }} · 공급처 {{ l.supplier_id }} · 입고 {{ l.receipt_date }} · 입고검사
+      <span class="pill s-{{ l.inspection_result }}">{{ l.inspection_result }}</span> · 입고량 {{ l.received_qty }}kg</div>{% endfor %}
+    <div class="small">같은 로트 사용 배치(회수 아님 · 조사대상, R6): <b>{{ facts.same_lot_batches | join(', ') or '없음' }}</b></div>
+    {% for lc in facts.lot_clues or [] %}{% if lc.clues %}<div class="small" style="margin-top:6px"><b>원인 조사 {{ lc.status }}</b>
+      <ul class="tight">{% for c in lc.clues %}<li>{{ c | terms }}</li>{% endfor %}</ul></div>{% endif %}{% endfor %}
+  </div>
+  <div class="card"><b>재공급 판정 (R8, 상신 시점 — 최신은 재공급 계획 화면)</b> <span class="pill s-{{ rs.overall }}">{{ rs.overall }}</span>
+    <div>(가) 생산 {{ rs.production.line_id }} <span class="pill s-{{ rs.production.result }}">{{ rs.production.result }}</span>
+      가동률 {{ rs.production.utilization_pct }}% · 여유 {{ rs.production.spare_qty | num }}EA
+      = {{ rs.production.capacity_qty | num }} × (1 − {{ rs.production.utilization_pct }}%)
+      · 필요 {{ rs.production.need_qty | num }}EA <span class="tag">{{ rs.production.need_basis }}</span>
+      {% if rs.production.periods_needed %}· 필요 ÷ 여유 {{ rs.production.periods_needed }}{% endif %}</div>
+    <div class="small muted">{{ rs.production.capacity_period }} · 규칙: {{ rs.production.rule }}</div>
+    <div>(나) 조달 {{ rs.material.material_id }}({{ rs.material.supplier_id }}{{ ' 독점' if rs.material.is_exclusive }})
+      <span class="pill s-{{ rs.material.result }}">{{ rs.material.result }}</span>
+      사용 가능 로트 {{ rs.material.usable_lots | join(', ') or '없음' }} · 입고예정 PO {{ rs.material.pending_pos | map(attribute='po_id') | join(', ') or '없음' }}</div>
+    <div class="small muted">{{ rs.material.note }}</div>
+  </div>
+</div>
+
+<h2>영향 범위</h2>
+<div class="grid2">
+  <div><b>고객 인도분 (SBL)</b>
+    <table><tr><th>고객</th><th>출하</th><th>수량</th><th>출하일</th></tr>
+      {% for c in facts.impact.customers %}<tr><td>{{ c.customer_id }} {{ c.customer_name }}</td><td class="n">{{ c.shipments }}</td>
+        <td class="n">{{ c.qty | num }}</td><td class="small">{{ c.first_ship }}~{{ c.last_ship }}</td></tr>{% endfor %}</table>
+    {% if facts.impact.claim_customers_without_sbl %}
+    <p class="small" style="color:var(--red)">⚠ 확정 클레임이 있으나 SBL 출하 기록이 없는 고객:
+      {% for g in facts.impact.claim_customers_without_sbl %}{{ g.customer_id }}({{ g.claims }}건, {{ g.qty | num }}EA) {% endfor %}
+      — 회수 범위 확인 필요</p>{% endif %}
+  </div>
+  <div><b>사내 잔여재고 <span class="tag">가정 A-5 · 추정치</span></b>
+    <table><tr><th>배치</th><th>생산량</th><th>SBL 출하 합</th><th>추정 잔여</th></tr>
+      {% for i in facts.impact.inventory %}<tr><td>{{ i.batch_id }}</td><td class="n">{{ i.produced_qty | num }}</td>
+        <td class="n">{{ i.shipped_qty | num }}</td><td class="n">{{ i.est_qty | num }}</td></tr>{% endfor %}</table>
+    <p class="small muted">실재고 자료가 없어 생산량 − SBL 출하 합으로 추정합니다.</p>
+  </div>
+</div>
+
+<h2 id="decide">품질위원회 의결</h2>
+<div class="banner"><b>모의 의결</b> — 실제 품질위원회 의결이 아니라 시연용 입력입니다. 외부로 통지·발송되는 것은 없으며,
+  입력 결과에 따라 이 시스템의 상태와 작업만 갱신됩니다. 배치별로 {{ '해제 승인/해제 거절' if sub.kind == '재상신' else '승인/거절' }}하고 사유를 반드시 적으세요.</div>
+{% if sub.kind == '재상신' %}<p class="small">해제 승인 → 배치 정상 복귀 · 회수요청 철회 · 출하보류 해제 · 보류된 Task 취소 / 해제 거절 → 재검토 전 상태로 회수 유지 · 보류된 Task 재개</p>{% endif %}
+{% if not decidable %}<div class="alert">상신 요약이 아직 없어 의결할 수 없습니다. 위에서 요약을 먼저 작성하세요.</div>{% endif %}
+{% if preview %}{% set pp = preview.production %}
+<div class="card" id="preview">
+  <b>승인 시 예상 공급 영향</b> <span class="pill t-warn">예상치</span>
+  <span class="small muted">— 의결 전 미리보기. 의결 전 배치({{ preview.pending | join(', ') }})가 모두 승인된다고 가정하고
+    기존 재공급 판정(R8)을 그대로 계산한 값입니다(대상 {{ preview.batches | join(', ') }}). 실제 계획은 의결 후 재공급 계획 화면에서 갱신됩니다.</span>
+  <div class="row" style="margin-top:6px">
+    <div class="card"><div class="muted small">재공급 필요량 · {{ pp.need_basis }}</div><b>{{ pp.need_qty | num }} EA</b>
+      {% if pp.upper_qty != pp.need_qty %}<div class="small muted">상한값 {{ pp.upper_qty | num }} EA</div>{% endif %}</div>
+    <div class="card"><div class="muted small">{{ pp.line_id }} 여유량 (가동률 {{ pp.utilization_pct }}%)</div><b>{{ pp.spare_qty | num }} EA</b>
+      <div class="small muted">필요 ÷ 여유 {{ pp.periods_needed if pp.periods_needed is not none else '계산 불가' }}</div></div>
+    <div class="card"><div class="muted small">판정 (생산 · 조달 → 종합)</div>
+      <span class="pill t-{{ 'ok' if pp.result == '가능' else 'bad' }}">생산 {{ pp.result }}</span>
+      <span class="pill t-{{ 'ok' if preview.material.result == '가능' else ('warn' if preview.material.result == '지연' else 'bad') }}">조달 {{ preview.material.result }}</span>
+      → <b>{{ preview.overall }}</b></div>
+  </div>
+</div>
+{% endif %}
+<div class="scroll">
+<table>
+  <tr><th>배치</th><th>불량률(생산/출하)</th><th>현재 상태</th><th>의결</th></tr>
+  {% for t in facts.targets %}{% set d = decisions.get(t.batch_id) %}
+  <tr>
+    <td><b>{{ t.batch_id }}</b></td>
+    <td class="n">{{ t.rate_prod | pct }} / {{ t.rate_ship | pct }}</td>
+    <td><span class="pill s-{{ states[t.batch_id] }}">{{ states[t.batch_id] }}</span></td>
+    <td>
+    {% if d %}
+      <span class="pill t-{{ d.result | tone }}">{{ d.result }}</span> {{ d.decider }} · 업무일 {{ d.business_date | daylabel }} · 기록 시각 {{ d.decided_at }}<div class="small">사유: {{ d.reason }}</div>
+    {% elif sub.kind == '회수상신' and states[t.batch_id] != '회수대상' %}
+      <span class="muted">현재 {{ states[t.batch_id] }} — 이 상신에서 의결 대상 아님</span>
+    {% elif decidable %}
+      <form method="post" action="/submissions/{{ sub.id }}/batches/{{ t.batch_id }}/decide" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <input type="text" name="decider" value="품질위원회 위원장" required style="width:160px">
+        <input type="text" name="reason" required placeholder="사유 (필수)" style="flex:1 1 240px">
+        <button class="primary" name="decision" value="approve">{{ '해제 승인' if sub.kind == '재상신' else '승인' }}</button>
+        <button class="danger" name="decision" value="reject">{{ '해제 거절(회수 유지)' if sub.kind == '재상신' else '거절' }}</button>
+      </form>
+    {% else %}<span class="muted">요약 작성 후 의결 가능</span>{% endif %}
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+</div>
+
+{% if decisions %}
+<h2>의결 후속 처리 결과</h2>
+<div class="grid2">
+  <div><b>고객 인도분 상태</b>
+    <table><tr><th>출하</th><th>배치</th><th>고객</th><th>수량</th><th>상태</th></tr>
+      {% for s in ships %}<tr><td>{{ s.shipment_id }}</td><td>{{ s.batch_id }}</td><td>{{ s.customer_id }}</td>
+        <td class="n">{{ s.shipped_qty | num }}</td><td><span class="pill s-{{ s.state }}">{{ s.state }}</span></td></tr>{% endfor %}</table></div>
+  <div><b>사내 잔여재고 상태 <span class="tag">가정 A-5</span></b>
+    <table><tr><th>재고</th><th>추정(A-5)</th><th>실측</th><th>기준</th><th>상태</th></tr>
+      {% for i in inv %}<tr><td>{{ i.hold_id }}<div class="small muted">{{ i.basis }}</div></td>
+        <td class="n">{{ i.est_qty | num }}</td>
+        <td class="n">{% if i.measured_qty is not none %}<b>{{ i.measured_qty | num }}</b><div class="small muted">{{ i.measured_by }}</div>{% else %}-{% endif %}</td>
+        <td><span class="pill {{ 't-ok' if i.qty_basis == '실측' else 't-warn' }}">{{ i.qty_basis }}</span></td>
+        <td><span class="pill s-{{ i.state }}">{{ i.state }}</span></td></tr>
+      {% else %}<tr><td colspan="5" class="muted">없음</td></tr>{% endfor %}</table></div>
+</div>
+<h2>생성된 작업</h2>
+{% include "_tasks.html" %}
+{% endif %}
+{% endblock %}

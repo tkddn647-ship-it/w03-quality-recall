@@ -1,0 +1,170 @@
+{% extends "base.html" %}
+{% block body %}
+<h1>품질 회수 운영 대시보드
+  <span class="pill {{ 't-ok' if ai_configured else 't-warn' }}" style="font-size:12px;vertical-align:middle">AI({{ ai_provider }}) 키 {{ '설정됨' if ai_configured else '없음 — 수동 작성 경로' }}</span></h1>
+<p class="muted">클레임 → 확정 불량률 판정(R1) → AI 상신 요약 → 품질위원회 의결 → 고객 회수요청·사내재고 출하보류·재공급 Task</p>
+
+{% if seed.state == 'running' %}<div class="banner">시작 상태를 준비하고 있습니다 — {{ seed.detail }}. 잠시 후 새로고침하세요.</div>{% endif %}
+{% if seed.state == 'failed' %}<div class="alert">{{ seed.detail }} — '회수대상 상신'으로 이어서 진행할 수 있습니다.</div>{% endif %}
+<div class="card decide" id="decide-queue">
+  <form method="post" action="/business-day/next" style="float:right" onsubmit="return confirmNextDay(this)">
+    <input type="hidden" name="confirm_text" value=""><input type="hidden" name="actor" value="품질팀 운영 담당">
+    <button type="submit" title="A05 업무 달력: 주말 건너뜀. 기한이 지난 작업은 지연으로 표시됩니다">업무일 {{ business_date | daylabel }} → 다음 영업일</button></form>
+  <script>
+    function confirmNextDay(form) {
+      if (!window.confirm("업무일을 다음 영업일로 넘깁니다(주말 건너뜀). 처리 목표일이 지난 작업은 '지연'으로 표시됩니다.")) return false;
+      form.confirm_text.value = "넘기기"; return true;
+    }
+  </script>
+  <b style="font-size:16px">결정 대기 {{ decisions | length }}건</b>
+  <span class="small muted">— 사람이 판단해야 하는 것만, 급한 순서
+    ({% for k, v in urgency_help.items() %}<b>{{ urgency[k] }}</b> {{ v }}{{ ' · ' if not loop.last }}{% endfor %})</span>
+  {% if decisions %}
+  <ol>
+    {% for d in decisions %}
+    <li><span class="no">{{ d.no }}</span>
+      <span class="u"><span class="pill {{ 't-bad' if d.rank == 1 else ('t-warn' if d.rank == 2 else 's-대기') }}">{{ d.urgency }}</span></span>
+      <span><a href="{{ d.href }}"><b>{{ d.title | terms }}</b></a> <span class="small muted">· {{ d.kind }} · 담당 {{ d.owner }}</span>
+        <div class="why">왜 지금: {{ d.why | terms }}</div></span></li>
+    {% endfor %}
+  </ol>
+  {% else %}
+  <div style="margin-top:6px">지금 사람이 결정할 일은 없습니다. {% if not assessed %}먼저 <b>판정 실행</b>으로 회수대상을 확인하세요.{% endif %}</div>
+  {% endif %}
+</div>
+
+<div class="row">
+  {% for name, rows in state_counts.items() %}
+  <div class="card">
+    <div class="muted small">{{ name }}</div>
+    {% for r in rows %}<span class="pill s-{{ r.state }}">{{ r.state }} {% if name == '고객 인도분' %}출하 {{ r.n | num }}건(고객 {{ r.c }}곳){% else %}{{ r.n | num }}{{ count_units[name] }}{% endif %}</span> {% else %}<span class="muted">-</span>{% endfor %}
+  </div>
+  {% endfor %}
+</div>
+
+
+<h2>0. 클레임 접수</h2>
+<div class="card"><a href="/claims"><button class="primary" type="button">새 클레임 접수</button></a>
+  <a href="/external"><button type="button">외부 정보(언론 보도) 접수</button></a>
+  <span class="small muted">고객·제품·배치·수량·확정 여부·유형 입력 → 원본 불변 테이블에 저장 → 해당 배치 불량률 즉시 재계산·판정 갱신.
+  배치별 연결은 <code>/trace/배치ID</code>(배치 추적)에서 봅니다.</span></div>
+
+<h2>1. 판정</h2>
+<div class="card">
+  {% if not assessed %}
+    <p>원본 적재 완료. 판정을 실행하면 배치별 확정 불량률을 계산하고 기준 이상 배치를 <b>회수대상</b>으로 전환합니다.</p>
+  {% else %}
+    <p>판정 완료 — 회수대상 판정 규칙: <b>규격이탈 확정 클레임 기준 배치 불량률이 생산량·출하량 분모 중 하나라도 10% 이상</b>(R1·A-2),
+       조사대상 플래그 {{ flagged }}개 배치(R2·R6, 상태는 바꾸지 않음).</p>
+  {% endif %}
+  <form method="post" action="/assess" class="inline"><button class="primary">판정 실행</button></form>
+  <form method="post" action="/admin/reset" class="inline" onsubmit="return confirmReset(this)">
+    <input type="hidden" name="confirm_text" value="">
+    <button class="danger">초기화(원본 재적재)</button></form>
+  <script>
+    function confirmReset(form) {
+      const typed = window.prompt(
+        "판정·상신·의결·Task·이력이 모두 지워지고 원본을 다시 적재합니다.\n되돌릴 수 없습니다. 계속하려면 '초기화'를 입력하세요.");
+      if (typed !== "초기화") { if (typed !== null) alert("입력이 달라 초기화하지 않았습니다."); return false; }
+      form.confirm_text.value = typed;
+      return true;
+    }
+  </script>
+</div>
+
+{% if assessed %}
+<div class="scroll">
+<table>
+  <tr><th>배치</th><th>상태</th><th>제품</th><th>로트</th><th>확정 클레임</th><th>확정 수량</th>
+      <th>생산량</th><th>불량률(생산)</th><th>출하량</th><th>불량률(출하)</th><th>원본 QC 결과</th><th>조사대상</th></tr>
+  {% for b in batches %}
+  <tr>
+    <td><a href="/batches/{{ b.batch_id }}">{{ b.batch_id }}</a> <a class="small" href="/trace/{{ b.batch_id }}">추적</a></td>
+    <td><span class="pill s-{{ b.state }}">{{ b.state }}</span></td>
+    <td>{{ b.product_id }}</td><td>{{ b.lot_id }}</td>
+    <td class="n">{{ b.confirmed_claims | num }}</td><td class="n">{{ b.confirmed_qty | num }}</td>
+    <td class="n">{{ b.produced_qty | num }}</td>
+    <td class="n">{% if b.recall_prod %}<b style="color:var(--red)">{{ b.rate_prod | pct }}</b>{% else %}{{ b.rate_prod | pct }}{% endif %}</td>
+    <td class="n">{{ b.shipped_qty | num }}</td>
+    <td class="n">{% if b.recall_ship %}<b style="color:var(--red)">{{ b.rate_ship | pct }}</b>{% else %}{{ b.rate_ship | pct }}{% endif %}</td>
+    <td>{{ b.qc_result }}</td>
+    <td class="small">{% if b.corrections %}<span class="pill t-warn">정정 {{ b.corrections }}</span> {% endif %}
+        {% if b.investigate_flag %}<span class="pill s-조사대상">조사대상</span> {{ b.investigate_reason }}{% endif %}
+        {% if b.warning %}<div class="muted">{{ b.warning }}</div>{% endif %}</td>
+  </tr>
+  {% endfor %}
+</table>
+</div>
+<p class="small muted">확정 클레임이 있는 배치, 상태가 바뀐 배치, 같은 로트(R6) 배치만 표시합니다. 출하량 분모는 SBL 연결분 기준(PL-01·02만 존재).</p>
+{% endif %}
+
+<h2 id="submit">2. 품질위원회 상신</h2>
+<div class="card">
+  {% if pending_targets %}
+  <div style="margin-bottom:6px"><b>상신 대기</b> {{ pending_targets | length }}건 —
+    {% for b in pending_targets %}<a href="/trace/{{ b }}">{{ b }}</a>{{ ', ' if not loop.last }}{% endfor %}</div>
+  <form method="post" action="/submissions" class="inline"><button class="primary">회수대상 {{ pending_targets | length }}건 상신 (AI 요약 생성)</button></form>
+  {% endif %}
+  {% if review_count %}
+  <form method="post" action="/resubmissions" class="inline"><button class="primary">재검토 {{ review_count }}건 재상신 (회수 해제 여부)</button></form>
+  {% endif %}
+  {% for s in submissions %}
+    <div><a href="/submissions/{{ s.id }}">{{ s.kind }} #{{ s.id }}</a>
+      <span class="pill t-{{ s.ai_status | tone }}">AI 요약 검증 {{ s.ai_status }}</span>
+      <span class="pill t-{{ s.status | tone }}">{{ '의결 대기' if s.status == '상신' else s.status }}</span>
+      <span class="muted small">{{ s.batch_ids | fromjson | join(', ') }} · 업무일 {{ sub_dates.get(s.id) | daylabel }} · 기록 시각(실제) {{ s.created_at }}</span></div>
+  {% else %}
+    {% if not pending_targets %}<span class="muted">상신 대상 없음</span>{% endif %}
+  {% endfor %}
+</div>
+
+{% if plans %}
+<h2>재공급 계획</h2>
+<div class="card">
+  {% for p in plans %}<div><a href="/plans/{{ p.submission_id }}">재공급 계획 #{{ p.submission_id }}</a>
+    <span class="pill t-{{ p.state | tone }}">{{ p.state }}</span> R8 종합 <span class="pill s-{{ p.overall }}">{{ p.overall }}</span>
+    {% if p.alternative %}<span class="small">대안 ({{ p.alternative }}){{ ' ' ~ p.option_id if p.option_id }}</span>{% endif %}</div>{% endfor %}
+</div>
+{% endif %}
+
+{% if lots or unlinked %}
+<h2>로트 역추적 · 출하 연결 미확인</h2>
+<div class="grid2">
+  <div class="card"><b>원료 로트</b>
+    {% for l in lots %}<div><a href="/lots/{{ l.lot_id }}">{{ l.lot_id }}</a> <span class="pill t-{{ l.state | tone }}">{{ l.state }}</span>
+      <span class="small muted">{{ l.reason }}</span></div>{% else %}<span class="muted">-</span>{% endfor %}</div>
+  <div class="card"><b>출하 연결 미확인 고객</b> <span class="small muted">확정 클레임은 있으나 해당 배치 SBL 출하 기록 없음 → 회수요청 보류</span>
+    {% for u in unlinked %}<div>{{ u.customer_id }} · {{ u.batch_id }} · 클레임 {{ u.claims }}건 {{ u.claim_qty | num }}EA
+      <span class="pill t-{{ u.state | tone }}">{{ u.state }}</span>{% if u.confirmed_qty %} {{ u.confirmed_qty | num }}EA{% endif %}</div>
+    {% else %}<span class="muted">-</span>{% endfor %}</div>
+</div>
+{% endif %}
+{% if intakes %}
+<h2>최근 회신 (AI 구조화)</h2>
+<div class="card">{% for r in intakes %}<div><a href="/intakes/{{ r.id }}">회신 #{{ r.id }}</a> Task #{{ r.task_id }} {{ r.task_type }}
+  <span class="pill t-{{ r.status | tone }}">{{ r.status }}</span> <span class="small muted">{{ r.source or 'AI 실패' }} · {{ r.created_at }}</span></div>{% endfor %}</div>
+{% endif %}
+
+<h2 id="tasks">3. 작업(Task)</h2>
+{% include "_tasks.html" %}
+
+<h2>최근 처리 이력 <a class="small" href="/history">전체 보기</a></h2>
+{% include "_history.html" %}
+
+<details class="card" id="presets" style="margin-top:24px">
+  <summary><b>시연 프리셋</b> <span class="small muted">— 운영 화면 아님. 누르면 현재 상태를 초기화하고 시나리오를 실행합니다.</span></summary>
+  <p class="small muted">초기화 후 정상 시나리오(두 배치 승인)를 만든 다음 조건 변경을 실행합니다. 수치는 모의 데이터이며, 회신 프리셋은 AI를 1회 호출합니다.</p>
+  <div style="display:flex;gap:8px;flex-wrap:wrap">
+  {% for key, label in presets.items() %}
+    <form method="post" action="/presets/{{ key }}" class="inline" onsubmit="return confirmPreset(this)">
+      <input type="hidden" name="confirm_text" value=""><button>{{ label }}</button></form>
+  {% endfor %}
+  </div>
+  <script>
+    function confirmPreset(form) {
+      if (!window.confirm("현재 운영 상태를 초기화하고 프리셋을 실행합니다. 계속할까요?")) return false;
+      form.confirm_text.value = "프리셋"; return true;
+    }
+  </script>
+</details>
+{% endblock %}

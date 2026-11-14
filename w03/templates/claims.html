@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}클레임 접수{% endblock %}
+{% block body %}
+<h1>클레임 접수</h1>
+<div class="banner"><b>모의 입력</b> — 원본 {{ 'qc_claims_cv' | terms }}은 바꾸지 않고 앱의 {{ 'claim_addition' | terms }}에 따로 저장합니다.
+  저장하면 해당 배치 불량률을 두 분모로 즉시 다시 계산해 판정을 갱신하고(기준 이상이면 <b>회수대상</b> 전환 또는 유지),
+  새 회수대상은 대시보드 <a href="/#submit">상신 대기</a>에 자동으로 들어갑니다.
+  {% if not assessed %}<br><b>아직 판정 전</b>이라 접수만 되고, '판정 실행' 때 함께 반영됩니다.{% endif %}</div>
+
+{% if last %}
+<div class="card" style="border-color:{{ 'var(--red)' if last.after == '회수대상' and last.before != '회수대상' else 'var(--line)' }}">
+  <b>{{ last.claim_id }} 접수 완료</b> — {{ last.batch_id }}
+  {% if last.applied_date %}· 발생 {{ last.occurred_date }} · 적용 {{ last.applied_date | daylabel }}{% endif %}
+  {% if last.result %}· 판정 <b>{{ last.result }}</b>{% endif %}
+  {% if last.before %}({{ last.before }} → <span class="pill s-{{ last.after }}">{{ last.after }}</span>){% endif %}
+  {% if last.rate_prod is defined and last.rate_prod is not none %}· 재계산 {{ last.rate_prod | pct }} / {{ last.rate_ship | pct }} (확정 {{ last.confirmed_qty | num }}EA){% endif %}
+  {% if last.pending_submission %}<div style="margin-top:4px">→ <a href="/#submit">상신 대기 목록</a>에 추가됐습니다.</div>{% endif %}
+  {% if last.sbl_shipped_to_customer == false %}<div class="small" style="color:var(--amber)">이 고객의 해당 배치 SBL 출하 기록이 없습니다 — 출하 경로 확인이 필요합니다.</div>{% endif %}
+  <div class="small"><a href="/trace/{{ last.batch_id }}">배치 추적</a> · <a href="/batches/{{ last.batch_id }}">배치 상세</a></div>
+</div>
+{% endif %}
+
+<form method="post" action="/claims" class="card">
+  <div class="grid2">
+    <label>고객 <select name="customer_id" required>
+      {% for c in customers %}<option value="{{ c.customer_id }}">{{ c.customer_id }} · {{ c.customer_name }}</option>{% endfor %}
+    </select></label>
+    <label>제품 <select name="product_id" required>
+      {% for p in products %}<option value="{{ p.product_id }}">{{ p.product_id }} · {{ p.product_name }}</option>{% endfor %}
+    </select></label>
+    <label>배치 <input type="text" name="batch_id" list="batch-list" required placeholder="예: B-02-2602-02" autocomplete="off">
+      <datalist id="batch-list">{% for b in batches %}<option value="{{ b.batch_id }}">{{ b.batch_id }} · {{ b.product_id }} · 생산 {{ b.production_date }} · 생산량 {{ b.produced_qty | num }}EA</option>{% endfor %}</datalist></label>
+    <label>영향 수량(EA) <input type="number" name="qty" min="1" required></label>
+    <label>확정 여부 <select name="confirmed" required>
+      <option value="True" title="원래 이름: defect_confirmed=True">확정(규격이탈 확정)</option><option value="False">미확정(조사 필요)</option></select></label>
+    <label>발생일 (고객에게 문제가 생긴 날) <input type="date" name="occurred_date" required max="{{ today }}"></label>
+    <label>적용일 (판정에 반영할 업무일, 기본 현재 업무일) <input type="date" name="applied_date" value="{{ today }}" max="{{ today }}" required></label>
+    <label>클레임 유형 <select name="claim_type" required>
+      {% for t in claim_types %}<option>{{ t }}</option>{% endfor %}</select></label>
+    <label>접수자 (필수) <input type="text" name="actor" required placeholder="예: 품질팀 홍길동"></label>
+  </div>
+  <p style="margin-bottom:0"><button class="primary">접수 · 불량률 재계산</button>
+    <span class="small muted">제품과 배치가 맞지 않거나 수량이 배치 생산량을 넘으면 접수하지 않습니다.
+      발생일·적용일은 따로 기록합니다(A05) — 발생일 ≥ 배치 생산일, 발생일 ≤ 적용일 ≤ 현재 업무일, 적용일은 영업일.</span></p>
+</form>
+
+<h2>앱에서 접수한 클레임</h2>
+<div class="scroll"><table>
+  <tr><th>클레임</th><th>발생일</th><th>적용일</th><th>접수 시각(실제)</th><th>고객</th><th>배치</th><th>유형</th><th>확정 여부</th><th>수량</th><th>배치 상태</th><th>불량률(생산/출하)</th></tr>
+  {% for c in added %}<tr><td>{{ c.claim_id }}</td><td>{{ c.claim_date }}</td><td>{{ c.applied_date | daylabel }}</td><td class="small">{{ c.created_at }}</td><td>{{ c.customer_id }}</td>
+    <td><a href="/trace/{{ c.batch_id }}">{{ c.batch_id }}</a></td><td>{{ c.claim_type }}</td><td>{{ c.defect_confirmed | conf }}</td>
+    <td class="n">{{ c.qty_affected | int | num }}</td><td><span class="pill s-{{ c.state }}">{{ c.state }}</span></td>
+    <td class="n">{{ c.rate_prod | pct }} / {{ c.rate_ship | pct }}</td></tr>
+  {% else %}<tr><td colspan="11" class="muted">아직 없음</td></tr>{% endfor %}
+</table></div>
+{% endblock %}

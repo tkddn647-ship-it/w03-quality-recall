@@ -1,0 +1,96 @@
+{% if tasks %}
+<div class="scroll">
+<table>
+  <tr><th>#</th><th>부서</th><th>종류</th><th>내용</th><th>상태</th><th>처리 목표(A-28)</th><th>다음 행동</th><th>처리</th></tr>
+  {% for t in tasks %}{% set d = t.detail_json | fromjson %}
+  <tr id="task-{{ t.id }}"{% if t.state in ('취소',) %} style="opacity:.55"{% endif %}>
+    <td>{{ t.id }}</td><td>{{ t.dept }}</td><td>{{ t.type }}</td>
+    <td>{{ t.title | terms }}</td>
+    <td><span class="pill s-{{ t.state }} t-{{ t.state | tone }}">{{ t.state }}</span>
+      {% if t.delayed_at and t.state in ('대기', '진행') %}<span class="pill t-bad">지연</span>{% endif %}</td>
+    <td class="small">{{ t.due_date | daylabel }}</td>
+    <td class="small">{% if d and d.next %}{{ d.next }}{% endif %}
+      {% if d and d.plan and t.type == '재공급 요청' %}<a href="{{ d.plan }}">재공급 계획</a>{% endif %}
+      {% if t.type == '추가검사' and d.lot %}<a href="/lots/{{ d.lot }}">로트 역추적</a>{% endif %}
+      {% if t.type == '원인 조사' and d.clues %}<div style="margin-top:4px"><b>{{ d.clue_label }}</b>
+        <ul class="tight">{% for c in d.clues %}<li>{{ c }}</li>{% endfor %}{% for c in d.clue_limits %}<li class="muted">{{ c }}</li>{% endfor %}</ul>
+        <a href="/lots/{{ d.lot }}#clues">로트 화면에서 투입 시점 보기</a></div>{% endif %}</td>
+    <td>{% if t.state in ('대기', '진행') %}
+      {% if t.type == '사내재고 격리' %}
+      <form method="post" action="/tasks/{{ t.id }}/quarantine" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+        <input type="number" name="qty" min="0" required value="{{ d.est_qty }}" style="width:100px" title="실제 격리 수량(EA)">
+        <input type="text" name="actor" required value="물류 담당자" style="width:110px">
+        <input type="hidden" name="next" value="{{ request.url.path }}">
+        <button class="sm">격리 수량 회신</button>
+      </form>
+      <div class="small muted">모의 회신 · 추정 {{ d.est_qty | num }}EA → 실측으로 대체</div>
+      {% elif t.type == '추가검사' %}
+      <form method="post" action="/tasks/{{ t.id }}/inspection" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+        <input type="number" name="inspected_qty" min="1" required value="{{ d.est_qty }}" style="width:90px" title="검사 수량">
+        <input type="number" name="defect_qty" min="0" placeholder="불량(불합격 시)" style="width:110px">
+        <input type="text" name="actor" required value="품질 검사원" style="width:100px">
+        <input type="hidden" name="next" value="{{ request.url.path }}">
+        <button class="sm" name="result" value="pass">합격</button>
+        <button class="sm danger" name="result" value="fail">불합격</button>
+      </form>
+      <div class="small muted">모의 회신 · 합격 → 출하 가능 / 불합격 → 클레임 등록·R1 재판정</div>
+      {% elif t.type == '출하 경로 확인 요청' %}
+      <form method="post" action="/tasks/{{ t.id }}/shipment-route" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+        <input type="number" name="qty" min="1" placeholder="출하 수량" style="width:100px" title="최대 {{ d.max_qty }}">
+        <input type="text" name="actor" required value="영업 담당" style="width:90px">
+        <input type="hidden" name="next" value="{{ request.url.path }}">
+        <button class="sm" name="decision" value="shipped">출하 확인</button>
+        <button class="sm danger" name="decision" value="none">출하 없음</button>
+      </form>
+      <div class="small muted">모의 회신 · 최대 {{ d.max_qty | num }}EA(생산량−SBL 출하 합)</div>
+      {% elif t.type in ('영업 승인', '투자 승인') %}
+      <form method="post" action="/tasks/{{ t.id }}/approval" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+        <input type="text" name="actor" required value="{{ '영업 임원' if t.type == '영업 승인' else 'CEO/이사회' }}" style="width:100px">
+        <input type="text" name="reason" required placeholder="사유 (필수)" style="width:150px">
+        <input type="hidden" name="next" value="{{ request.url.path }}">
+        <button class="sm" name="decision" value="approve">승인</button>
+        <button class="sm danger" name="decision" value="reject">거절</button>
+      </form>
+      <div class="small muted">모의 회신</div>
+      {% elif t.type == '납기 연기 동의 요청' %}
+      <form method="post" action="/tasks/{{ t.id }}/customer-reply" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+        <input type="text" name="actor" required value="{{ t.related_id }} 구매담당" style="width:110px">
+        <input type="text" name="reason" required placeholder="사유 (필수)" style="width:150px">
+        <input type="hidden" name="next" value="{{ request.url.path }}">
+        <button class="sm" name="decision" value="agree">동의</button>
+        <button class="sm danger" name="decision" value="reject">거절</button>
+      </form>
+      <div class="small muted">모의 고객 회신</div>
+      {% elif t.type == '조달 확인' %}
+      <form method="post" action="/tasks/{{ t.id }}/procurement-reply" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+        <input type="text" name="actor" required value="조달 담당" style="width:100px">
+        <input type="text" name="reason" required placeholder="사유 (필수)" style="width:150px">
+        <input type="hidden" name="next" value="{{ request.url.path }}">
+        <button class="sm" name="decision" value="feasible">가능</button>
+        <button class="sm danger" name="decision" value="infeasible">불가</button>
+      </form>
+      <div class="small muted">모의 회신 · 회신 전에는 '충족'으로 확정하지 않음</div>
+      {% elif t.type == '보유량 회신 수집' %}
+      <a class="small" href="/plans/{{ t.submission_id }}">재공급 계획에서 회신 입력·마감</a>
+      {% else %}
+      <form method="post" action="/tasks/{{ t.id }}/advance" class="inline">
+        <input type="hidden" name="actor" value="{{ t.dept }} 담당자">
+        <input type="hidden" name="next" value="{{ request.url.path }}">
+        <button class="sm">{{ '착수' if t.state == '대기' else '완료' }}</button>
+      </form>{% endif %}
+      {% if t.type in REPLY_SPECS %}
+      <details style="margin-top:4px"><summary class="small">자유 형식 회신 → AI 구조화</summary>
+        <form method="post" action="/tasks/{{ t.id }}/reply-text" style="margin-top:4px">
+          <textarea name="raw_text" rows="3" required placeholder="예: {{ REPLY_SPECS[t.type].example }}"></textarea>
+          <div style="display:flex;gap:6px;margin-top:4px"><input type="text" name="submitted_by" required value="{{ t.related_id }} 담당(모의)" style="width:150px">
+          <button class="sm primary">AI 구조화 · 검증</button></div>
+        </form></details>
+      {% endif %}
+    {% elif t.state == '보류(재검토 대기)' %}<span class="small muted">재상신 결과 대기</span>{% endif %}</td>
+  </tr>
+  {% endfor %}
+</table>
+</div>
+{% else %}
+<div class="card muted">아직 생성된 작업이 없습니다. 품질위원회 의결 후 자동 생성됩니다.</div>
+{% endif %}

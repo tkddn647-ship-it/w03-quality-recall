@@ -1,0 +1,12 @@
+# 대회 기록 키 폴더 — 올리지 않음
+.claude/
+.codex/
+.agents/
+# 대회 배포 자료·원본 데이터 — 재배포하지 않음
+01_참가자_배포용/
+# 비밀값·실행 산출물
+.env
+*.db
+__pycache__/
+.venv/
+.pytest_cache/
